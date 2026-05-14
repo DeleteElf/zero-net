@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func receive(cli *client.Client, channelIndex int) {
+func receiveHandler(cli *client.Client, channelIndex int) {
 	slog.Info("正在准备接收数据", slog.Int("channel", channelIndex))
 	err := cli.ReceiveDataToBuffer(channelIndex)
 	if !err {
@@ -35,7 +35,7 @@ func TestClient(t *testing.T) {
 	}
 	slog.Info("客户端连接成功！", slog.Int("通道数", cli.ChannelCount))
 	for i := 0; i < cli.ChannelCount; i++ {
-		go receive(cli, i)
+		go receiveHandler(cli, i)
 	}
 	msg0 := "hello,i am channel 0 data from client"
 	slog.Info("正在向通道0发送数据", slog.String("msg", msg0))
