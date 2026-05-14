@@ -37,12 +37,12 @@ func NewClient(addr string, id string) *Client {
 }
 
 // 创建常规的网络接口，这个不对外暴露
-func newSocketClient(serverAddr string, networkType string) (net.PacketConn, net.Addr, error) {
-	svrAddr, err := net.ResolveUDPAddr(networkType, serverAddr)
+func newUdpSocketClient(serverAddr string) (net.PacketConn, net.Addr, error) {
+	svrAddr, err := net.ResolveUDPAddr("udp", serverAddr)
 	if err != nil {
 		return nil, svrAddr, err
 	}
-	conn, err := net.ListenUDP(networkType, nil)
+	conn, err := net.ListenUDP("udp", nil)
 	if err != nil {
 		return nil, svrAddr, err
 	}
@@ -89,13 +89,16 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 	if !cli.IsClosed {
 		return errors.New("当前客户端已经连接！")
 	}
+	if networkType != "udp" {
+		return errors.New("暂时只支持udp连接！")
+	}
 	cli.IsClosed = false
 	cli.ChannelCount = channelCount
 	cli.CurrentBuffers = make([]*streams.StreamChannelData, channelCount)
 	cli.Streams = make([]*quic.Stream, channelCount)
 	cli.CreateChannels(channelCount)
 	var err error
-	cli.netConn, cli.netAddr, err = newSocketClient(cli.ServerAddress, networkType)
+	cli.netConn, cli.netAddr, err = newUdpSocketClient(cli.ServerAddress)
 	if err != nil {
 		slog.Error("客户端连接服务器失败", slog.Any("err", err))
 		cli.Close()
