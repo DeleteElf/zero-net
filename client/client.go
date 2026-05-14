@@ -23,7 +23,6 @@ type Client struct {
 	quicConn      *quic.Conn
 	Streams       []*quic.Stream
 	streams.StreamChannelObject
-	HeartbeatTimeout time.Duration
 }
 
 // NewClient 创建客户端实例
@@ -103,8 +102,8 @@ func (cli *Client) Connect(channelCount int) error {
 	}
 	tlsConfig := utils.GenTLSConfig()
 	quicConfig := &quic.Config{
-		MaxIncomingStreams: 0xffffffffffff, // 最大默认stream输入，默认100
-		// HandshakeIdleTimeout:           5 * time.Second,  // 默认5s
+		MaxIncomingStreams:      0xffffffffffff,  // 最大默认stream输入，默认100
+		HandshakeIdleTimeout:    5 * time.Second, // 默认5s
 		MaxIdleTimeout:          5 * time.Second, // 默认30s
 		KeepAlivePeriod:         3 * time.Second, // 建议是 MaxIdleTimeout 的一半，或者更小的值
 		InitialPacketSize:       1300,
