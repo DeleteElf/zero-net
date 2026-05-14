@@ -36,12 +36,13 @@ func NewClient(addr string, id string) *Client {
 	return cli
 }
 
-func NewSockClient(serverAddr string) (net.PacketConn, net.Addr, error) {
-	svrAddr, err := net.ResolveUDPAddr("udp", serverAddr)
+// 创建常规的网络接口，这个不对外暴露
+func newSocketClient(serverAddr string, networkType string) (net.PacketConn, net.Addr, error) {
+	svrAddr, err := net.ResolveUDPAddr(networkType, serverAddr)
 	if err != nil {
 		return nil, svrAddr, err
 	}
-	conn, err := net.ListenUDP("udp", nil)
+	conn, err := net.ListenUDP(networkType, nil)
 	if err != nil {
 		return nil, svrAddr, err
 	}
@@ -81,7 +82,7 @@ func (cli *Client) OnClosed() {
 	slog.Debug("客户端已经关闭")
 }
 
-func (cli *Client) Connect(channelCount int) error {
+func (cli *Client) Connect(channelCount int, networkType string) error {
 	if cli.ChannelCount != 0 {
 		return errors.New("当前客户端通道数错误！")
 	}
@@ -94,7 +95,7 @@ func (cli *Client) Connect(channelCount int) error {
 	cli.Streams = make([]*quic.Stream, channelCount)
 	cli.CreateChannels(channelCount)
 	var err error
-	cli.netConn, cli.netAddr, err = NewSockClient(cli.ServerAddress)
+	cli.netConn, cli.netAddr, err = newSocketClient(cli.ServerAddress, networkType)
 	if err != nil {
 		slog.Error("客户端连接服务器失败", slog.Any("err", err))
 		cli.Close()

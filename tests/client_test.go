@@ -27,7 +27,7 @@ func TestClient(t *testing.T) {
 	utils.InitLog(slog.LevelDebug, nil)                  //初始化日志
 	cli := client.NewClient("127.0.0.1:10001", "test01") //尝试连接本机服务
 
-	err := cli.Connect(2)
+	err := cli.Connect(2, streams.STREAM_NETWORK_UDP) //创建udp网络
 
 	if err != nil {
 		slog.Error("客户端连接失败", slog.Any("err", err))
