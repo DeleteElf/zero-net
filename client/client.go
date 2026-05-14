@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"github.com/DeleteElf/network-quic/streams"
 	"log/slog"
 	"net"
@@ -13,7 +14,8 @@ import (
 
 // Client 客户端
 type Client struct {
-	Id string
+	Id           string
+	ChannelCount int
 	//需要连接的服务端地址
 	ServerAddress string
 	netConn       net.PacketConn
@@ -31,6 +33,7 @@ func NewClient(addr string, id string) *Client {
 		Id:            id,
 	}
 	cli.SetOnCloseHandler(cli)
+	cli.IsClosed = true
 	return cli
 }
 
@@ -75,10 +78,19 @@ func (cli *Client) OnClosing() bool {
 }
 
 func (cli *Client) OnClosed() {
+	cli.ChannelCount = 0
 	slog.Debug("客户端已经关闭")
 }
 
 func (cli *Client) Connect(channelCount int) error {
+	if cli.ChannelCount != 0 {
+		return errors.New("当前客户端通道数错误！")
+	}
+	if !cli.IsClosed {
+		return errors.New("当前客户端已经连接！")
+	}
+	cli.IsClosed = false
+	cli.ChannelCount = channelCount
 	cli.CurrentBuffers = make([]*streams.StreamChannelData, channelCount)
 	cli.Streams = make([]*quic.Stream, channelCount)
 	cli.CreateChannels(channelCount)
