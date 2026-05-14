@@ -1,0 +1,47 @@
+#include <windows.h>
+#pragma code_page(65001)
+
+#define VER_MAJOR 1
+#define VER_MINOR 0
+#define VER_PATCH 26
+#define VER_REVISION 051401
+
+#define MN "NetworkQuic"
+#define MD "Network quic plugin for C"
+#define MF "network-quic.dll"
+#define MW "DeleteElf"
+#define MB "Copyright © 2026 DeleteElf. All rights reserved."
+
+#define MAKEVER_S(a,b,c,d) a,b,c,d
+#define MAKEVER(a,b,c,d) a.b.c.d
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     MAKEVER_S(VER_MAJOR, VER_MINOR, VER_PATCH, VER_REVISION)
+PRODUCTVERSION  MAKEVER_S(VER_MAJOR, VER_MINOR, VER_PATCH, VER_REVISION)
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS__WINDOWS32
+FILETYPE        VFT_DLL
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", MW
+            VALUE "FileDescription", MD
+            VALUE "FileVersion", TOSTRING(FILEVERSION)
+            VALUE "InternalName", MN
+            VALUE "LegalCopyright", MB
+            VALUE "OriginalFilename", MF
+            VALUE "ProductName", MN
+            VALUE "ProductVersion", TOSTRING(MAKEVER(VER_MAJOR, VER_MINOR, VER_PATCH, VER_REVISION))
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

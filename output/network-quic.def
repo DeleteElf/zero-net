@@ -1,0 +1,14 @@
+LIBRARY
+EXPORTS
+    InitLog
+    InitLogCallback
+    ClientCreate
+    ClientSocketCreate
+    ServerCreate
+    ServerClose
+    SocketAccept
+    SocketClose
+    SocketValidate
+    SocketSend
+    ServerSocketReceive
+    ClientChannelReceive
