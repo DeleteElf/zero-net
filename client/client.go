@@ -38,11 +38,11 @@ func NewClient(addr string, id string) *Client {
 
 // 创建常规的网络接口，这个不对外暴露
 func newUdpSocketClient(serverAddr string) (net.PacketConn, net.Addr, error) {
-	svrAddr, err := net.ResolveUDPAddr("udp", serverAddr)
+	svrAddr, err := net.ResolveUDPAddr(streams.STREAM_NETWORK_UDP, serverAddr)
 	if err != nil {
 		return nil, svrAddr, err
 	}
-	conn, err := net.ListenUDP("udp", nil)
+	conn, err := net.ListenUDP(streams.STREAM_NETWORK_UDP, nil)
 	if err != nil {
 		return nil, svrAddr, err
 	}
@@ -110,7 +110,7 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 		HandshakeIdleTimeout:    5 * time.Second, // 默认5s
 		MaxIdleTimeout:          5 * time.Second, // 默认30s
 		KeepAlivePeriod:         3 * time.Second, // 建议是 MaxIdleTimeout 的一半，或者更小的值
-		InitialPacketSize:       1300,
+		InitialPacketSize:       1500,            //当前最大数据包一个基础包的大小
 		DisablePathMTUDiscovery: true,
 		Allow0RTT:               true,
 		// EnableDatagrams:    true,
