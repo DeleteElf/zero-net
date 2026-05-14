@@ -24,6 +24,9 @@ profile.cov
 go.work
 go.work.sum
 
+# Go sum
+go.sum
+
 # env file
 .env
 
@@ -38,4 +41,4 @@ go.work.sum
 *.syso
 
 # go 1.25.9 之后，会自动生成.h文件，所以这个文件也不再作为项目资产
-*.h 
+*.h
