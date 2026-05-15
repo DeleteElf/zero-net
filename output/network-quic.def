@@ -4,11 +4,12 @@ EXPORTS
     InitLogCallback
     ClientCreate
     ClientSocketCreate
+    ClientChannelReceive
+    ClientChannelSend
     ServerCreate
     ServerClose
-    SocketAccept
-    SocketClose
-    SocketValidate
-    SocketSend
+    ServerSetOnAcceptSocket
+    ServerStartListen
+    ServerSocketClose
+    ServerSocketSend
     ServerSocketReceive
-    ClientChannelReceive
