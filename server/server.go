@@ -12,14 +12,14 @@ import (
 	"time"
 )
 
-const MAX_STREAM_COUNT = 5
+const MaxStreamCount = 6
 
 func newUdpSocketServer(addr string) (net.PacketConn, error) {
 	var err error
 	config := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			err := c.Control(func(fd uintptr) {
-				syscall.SetsockoptInt(syscall.Handle(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+				_ = syscall.SetsockoptInt(syscall.Handle(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
 			})
 			return err
 		},
@@ -38,12 +38,37 @@ type Stream struct {
 	Server *Server
 }
 
-type Server struct {
-	isAgent  bool
-	netConn  net.PacketConn
-	listener *quic.Listener
-	Streams  [MAX_STREAM_COUNT]*quic.Stream
+type Socket struct {
+	Id      string
+	Streams [MaxStreamCount]*quic.Stream
 	streams.StreamChannelObject
+}
+
+func (s *Socket) OnClosing() bool {
+	for idx, stream := range s.Streams {
+		if stream != nil {
+			slog.Info("正在关闭流", slog.String("id", s.Id), slog.Int("chn", idx))
+			_ = stream.Close()
+		}
+		s.Streams[idx] = nil
+	}
+	return true
+}
+
+func (s *Socket) OnClosed() {
+	slog.Debug("Socket已经关闭", slog.String("id", s.Id))
+}
+
+type Server struct {
+	isAgent        bool
+	netConn        net.PacketConn
+	listener       *quic.Listener
+	sockets        map[string]*Socket
+	IsClosed       bool
+	onCloseHandler streams.OnCloseHandler
+	streams.Closeable
+
+	OnAccept chan string
 }
 
 // NewServer 创建新的服务实例，根据设置的地址监听
@@ -54,11 +79,12 @@ func NewServer(address string, isAgent bool) *Server {
 		return nil
 	}
 	svr := &Server{
-		isAgent: isAgent,
-		netConn: netConn,
+		isAgent:  isAgent,
+		netConn:  netConn,
+		OnAccept: make(chan string),
+		sockets:  make(map[string]*Socket),
 	}
 	svr.SetOnCloseHandler(svr)
-	svr.CreateChannels(1)
 	svr.IsClosed = false
 	return svr
 }
@@ -69,31 +95,46 @@ func NewServerByPort(port int, isAgent bool) *Server {
 }
 
 func (s *Server) OnClosing() bool {
-	if s.isAgent {
-		slog.Debug("正在关闭代理相关")
-		// 服务端先关闭，避免监听无法关闭
-		if s.netConn != nil {
-			_ = s.netConn.Close()
-			s.netConn = nil
-		}
-		if s.listener != nil {
-			_ = s.listener.Close()
-			s.listener = nil
-		}
+	slog.Debug("正在关闭基础连接")
+	// 服务端先关闭，避免监听无法关闭
+	if s.netConn != nil {
+		_ = s.netConn.Close()
+		s.netConn = nil
 	}
-	slog.Debug("正在关闭流")
-	for idx, stream := range s.Streams {
-		if stream != nil {
-			slog.Info("quic close stream", slog.Int("chn", idx))
-			_ = stream.Close()
-		}
-		s.Streams[idx] = nil
+	if s.listener != nil {
+		_ = s.listener.Close()
+		s.listener = nil
 	}
+	slog.Debug("正在关闭socket")
+	for key, _ := range s.sockets {
+		_ = s.CloseSocket(key)
+	}
+	s.sockets = nil
+	slog.Debug("正在关闭Accept")
+	close(s.OnAccept)
 	return true
 }
 
 func (s *Server) OnClosed() {
 	slog.Debug("服务端已经关闭")
+}
+
+// SetOnCloseHandler 设置关闭时需要执行的句柄
+func (s *Server) SetOnCloseHandler(handler streams.OnCloseHandler) {
+	s.onCloseHandler = handler
+}
+
+// Close 关闭流对象
+func (s *Server) Close() {
+	if !s.IsClosed { //防止多次执行
+		s.IsClosed = true
+		//开始释放资源
+		if s.onCloseHandler != nil {
+			if s.onCloseHandler.OnClosing() {
+				s.onCloseHandler.OnClosed()
+			}
+		}
+	}
 }
 
 func (s *Server) StartListen() {
@@ -122,8 +163,7 @@ func (s *Server) StartListen() {
 		if s.listener == nil {
 			break
 		}
-		quicConn, err := s.listener.Accept(context.Background())
-		//quicConn, err := s.listener.Accept(context.TODO())
+		quicConn, err := s.listener.Accept(context.TODO())
 		if s.IsClosed { //不再接受新的连接
 			break
 		}
@@ -160,21 +200,47 @@ func (s *Server) processStream(stream *quic.Stream) {
 	streamId := stream.StreamID()
 	info, err := streams.ReadStreamInfo(stream)
 	if err != nil {
-		slog.Error("quic get stream info fail", slog.Any("streamId", streamId), slog.Any("err", err))
+		slog.Error("获取流信息失败", slog.Any("streamId", streamId), slog.Any("err", err))
 		_ = streams.CloseStream(stream)
 		return
 	}
 	if err := streams.ValidateStreamInfo(info); err != nil {
-		slog.Warn("invalid stream info", slog.Any("err", err))
+		slog.Warn("无效的流信息", slog.Any("err", err))
 		_ = streams.CloseStream(stream)
 		return
 	}
-	if info.Index < 0 || info.Index >= MAX_STREAM_COUNT {
+	if info.Index < 0 || info.Index >= MaxStreamCount {
 		slog.Error("无效的通道", slog.Any("chn", info.Index))
 		_ = streams.CloseStream(stream)
 		return
 	}
 	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId))
-	s.Streams[info.Index] = stream
-	go s.HandleChannelStreamData(s.StreamChannels[0], info.Index, stream)
+	if s.sockets[info.Id] == nil {
+		sock := &Socket{
+			Id: info.Id,
+			StreamChannelObject: streams.StreamChannelObject{
+				IsClosed: false,
+			},
+		}
+		sock.SetOnCloseHandler(sock)
+		sock.CreateChannels(1)
+		s.sockets[info.Id] = sock
+		s.OnAccept <- info.Id
+	}
+	socket := s.sockets[info.Id]
+	socket.Streams[info.Index] = stream
+	go socket.HandleChannelStreamData(socket.StreamChannels[0], info.Index, stream)
+}
+func (s *Server) CloseSocket(id string) error {
+	if s.sockets[id] != nil {
+		s.sockets[id].Close()
+		delete(s.sockets, id)
+	}
+	return nil
+}
+func (s *Server) GetSocket(id string) *Socket {
+	if s.sockets[id] != nil {
+		return s.sockets[id]
+	}
+	return nil
 }

@@ -167,6 +167,9 @@ func (o *StreamChannelObject) HandleChannelStreamData(sc *StreamChannel, channel
 }
 
 func (o *StreamChannelObject) ReceiveDataToBuffer(channelIndex int) bool {
+	if len(o.CurrentBuffers) == 0 {
+		return false
+	}
 	if o.CurrentBuffers[channelIndex] == nil { //当前缓存没有工作时
 		buffer, ok := <-o.StreamChannels[channelIndex].Channel
 		if !ok {
