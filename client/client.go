@@ -127,6 +127,7 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 	info := streams.StreamInfo{
 		Id:    cli.Id,
 		Index: 0,
+		Ts:    time.Now().Unix(),
 	}
 	for i := 0; i < channelCount; i++ {
 		info.Index = i
