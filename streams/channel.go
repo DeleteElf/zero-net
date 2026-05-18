@@ -22,9 +22,10 @@ type StreamChannelData struct {
 type StreamChannel struct {
 	Channel chan StreamChannelData
 	//Closed  chan bool
-	Id     int
-	Cancel context.CancelFunc
-	Done   bool
+	Id         int
+	Cancel     context.CancelFunc
+	Done       bool
+	OneChannel bool
 }
 
 func NewStreamChannel(id int) *StreamChannel {
@@ -102,6 +103,7 @@ func (o *StreamChannelObject) Close() {
 			if o.onCloseHandler.OnClosing() {
 				for i := 0; i < len(o.StreamChannels); i++ {
 					if o.StreamChannels[i] != nil {
+						o.StreamChannels[i].Cancel()
 						o.StreamChannels[i].Close(time.Second)
 						o.StreamChannels[i] = nil
 					}
@@ -124,6 +126,9 @@ func (o *StreamChannelObject) CreateChannels(count int) {
 	o.CurrentBuffers = make([]*StreamChannelData, count) //创建缓存通道列表
 	for i := 0; i < count; i++ {
 		o.StreamChannels[i] = NewStreamChannel(i) //make(chan StreamChannelData, 3) //创建通道实例
+		if count == 1 {
+			o.StreamChannels[i].OneChannel = true
+		}
 	}
 }
 
@@ -132,11 +137,15 @@ func (o *StreamChannelObject) HandleChannelStreamData(sc *StreamChannel, channel
 	_, sc.Cancel = context.WithCancel(stream.Context())
 	defer func() {
 		if !sc.Done && sc.Channel != nil {
-			close(sc.Channel)
+			if !sc.OneChannel || channelId == 0 {
+				close(sc.Channel)
+			}
 			sc.Channel = nil
 		}
 		sc.Done = true
 	}()
+	slog.Debug("开始读取通道数据", slog.Int("channel", channelId))
+
 	for {
 		if o.IsClosed {
 			return
@@ -156,6 +165,12 @@ func (o *StreamChannelObject) HandleChannelStreamData(sc *StreamChannel, channel
 			return
 		}
 		if len(buf) == 0 { //读取到0长度的数据包，我们认为是断开连接了
+			return
+		}
+		if sc == nil {
+			return
+		}
+		if sc.Channel == nil {
 			return
 		}
 		sc.Channel <- StreamChannelData{

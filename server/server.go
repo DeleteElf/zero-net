@@ -42,6 +42,7 @@ type Socket struct {
 	Id      string
 	Streams [MaxStreamCount]*quic.Stream
 	streams.StreamChannelObject
+	Count int
 }
 
 func (s *Socket) OnClosing() bool {
@@ -60,6 +61,7 @@ func (s *Socket) OnClosed() {
 }
 
 type Server struct {
+	//oneChannel     bool //这个功能存在问题
 	isAgent        bool
 	netConn        net.PacketConn
 	listener       *quic.Listener
@@ -131,6 +133,16 @@ func (s *Server) Close() {
 		//开始释放资源
 		if s.onCloseHandler != nil {
 			if s.onCloseHandler.OnClosing() {
+				if s.listener != nil {
+					_ = s.listener.Close()
+					s.listener = nil
+				}
+				if s.sockets != nil {
+					for key, socket := range s.sockets {
+						socket.Close()
+						delete(s.sockets, key)
+					}
+				}
 				s.onCloseHandler.OnClosed()
 			}
 		}
@@ -177,6 +189,10 @@ func (s *Server) StartListen() {
 	slog.Info("服务停止监听")
 }
 
+func (s *Server) StopListen() {
+	s.Close()
+}
+
 func (s *Server) acceptConnection(quicConn *quic.Conn) {
 	defer func() {
 		slog.Info("连接断开", slog.Any("addr", quicConn.RemoteAddr()))
@@ -217,19 +233,29 @@ func (s *Server) processStream(stream *quic.Stream) {
 	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId))
 	if s.sockets[info.Id] == nil {
 		sock := &Socket{
-			Id: info.Id,
+			Id:    info.Id,
+			Count: info.Count,
 			StreamChannelObject: streams.StreamChannelObject{
 				IsClosed: false,
 			},
 		}
 		sock.SetOnCloseHandler(sock)
-		sock.CreateChannels(1)
+		//if s.oneChannel {
+		//	sock.CreateChannels(1)
+		//} else {
+		sock.CreateChannels(info.Count)
+		//}
+
 		s.sockets[info.Id] = sock
 		s.OnAccept <- info.Id
 	}
 	socket := s.sockets[info.Id]
 	socket.Streams[info.Index] = stream
-	go socket.HandleChannelStreamData(socket.StreamChannels[0], info.Index, stream)
+	index := info.Index
+	//if s.oneChannel {
+	//	index = 0
+	//}
+	go socket.HandleChannelStreamData(socket.StreamChannels[index], info.Index, stream)
 }
 func (s *Server) CloseSocket(id string) error {
 	if s.sockets[id] != nil {

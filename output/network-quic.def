@@ -2,14 +2,18 @@ LIBRARY
 EXPORTS
     InitLog
     InitLogCallback
+
     ClientCreate
-    ClientSocketCreate
+    ClientClose
+    ClientConnect
     ClientChannelReceive
     ClientChannelSend
+
     ServerCreate
     ServerClose
     ServerSetOnAcceptSocket
     ServerStartListen
+    ServerStopListen
     ServerSocketClose
     ServerSocketSend
     ServerSocketReceive

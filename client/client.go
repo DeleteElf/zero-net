@@ -126,7 +126,7 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 	cli.quicConn = quicConn
 	info := streams.StreamInfo{
 		Id:    cli.Id,
-		Index: 0,
+		Count: channelCount,
 		Ts:    time.Now().Unix(),
 	}
 	for i := 0; i < channelCount; i++ {

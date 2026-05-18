@@ -122,6 +122,9 @@ type logCallbackWriter struct{}
 
 func (logCallbackWriter) Write(p []byte) (n int, err error) {
 	C.call_logCallback(C.CString(string(p)), logCallback)
+	//if logCallback != nil {
+	//	logCallback(C.CString(string(p)))
+	//}
 	return len(p), nil
 }
 
@@ -155,8 +158,19 @@ func ClientCreate() C.int {
 	return C.Success
 }
 
-//export ClientSocketCreate
-func ClientSocketCreate(channelCount C.int, config *C.NetworkData) C.int {
+//export ClientClose
+func ClientClose() C.int {
+	if clientCtx == nil {
+		slog.Warn("未检索到有效的客户端！")
+		return C.ErrorContext
+	}
+	clientCtx.Close()
+	clientCtx = nil
+	return C.Success
+}
+
+//export ClientConnect
+func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	if config == nil {
 		return C.ErrorParam
 	}
@@ -303,6 +317,9 @@ func ServerSetOnAcceptSocket(callback C.AcceptSocket) C.int {
 			}
 			select {
 			case id := <-serverCtx.OnAccept:
+				//if onAcceptSocket != nil {
+				//	onAcceptSocket(C.CString(id))
+				//}
 				C.call_onAcceptSocket(C.CString(id), onAcceptSocket)
 			}
 		}

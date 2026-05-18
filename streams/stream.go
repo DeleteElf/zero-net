@@ -29,6 +29,7 @@ type StreamInfo struct {
 	Sign string `json:"s"` // 客户端的签名，用于服务端校验客户端的合法性
 
 	Index int `json:"i"`
+	Count int `json:"c"`
 }
 
 var ss = map[string]string{

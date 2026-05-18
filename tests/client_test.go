@@ -19,15 +19,21 @@ func receiveHandler(cli *client.Client, channelIndex int) {
 	buffer := cli.CurrentBuffers[channelIndex]
 	slog.Info("收到来自服务端的新消息", slog.Int("channel", channelIndex), slog.String("msg", string(buffer.Data)))
 	cli.CurrentBuffers[channelIndex] = nil
-
-	_, _ = cli.Send(cli.Streams[channelIndex], []byte("bye"))
+	if channelIndex == 0 {
+		_, _ = cli.Send(cli.Streams[channelIndex], []byte("bye"))
+		//} else if channelIndex == 1 {
+		//	//time.Sleep(500 * time.Millisecond)
+		//	_, _ = cli.Send(cli.Streams[channelIndex], []byte("restart"))
+	} else if channelIndex == 2 {
+		_, _ = cli.Send(cli.Streams[channelIndex], []byte("shutdown"))
+	}
 }
 
 func TestClient(t *testing.T) {
 	utils.InitLog(slog.LevelDebug, nil)                  //初始化日志
 	cli := client.NewClient("127.0.0.1:10001", "test01") //尝试连接本机服务
 
-	err := cli.Connect(2, streams.STREAM_NETWORK_UDP) //创建udp网络
+	err := cli.Connect(3, streams.STREAM_NETWORK_UDP) //创建udp网络
 
 	if err != nil {
 		slog.Error("客户端连接失败", slog.Any("err", err))
@@ -43,6 +49,10 @@ func TestClient(t *testing.T) {
 	msg1 := "hello,i am channel 1 data from client"
 	slog.Info("正在向通道1发送数据", slog.String("msg", msg1))
 	_, _ = cli.Send(cli.Streams[1], []byte(msg1))
+
+	msg2 := "hello,i am channel 2 data from client"
+	slog.Info("正在向通道2发送数据", slog.String("msg", msg2))
+	_, _ = cli.Send(cli.Streams[2], []byte(msg2))
 
 	time.Sleep(time.Second * 10)
 }
