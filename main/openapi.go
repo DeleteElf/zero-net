@@ -357,7 +357,7 @@ func ServerSocketClose(clientId *C.char) C.int {
 }
 
 //export ServerSocketSend
-func ServerSocketSend(clientId *C.char, chn C.int, data *C.NetworkData) C.int {
+func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int {
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -370,7 +370,7 @@ func ServerSocketSend(clientId *C.char, chn C.int, data *C.NetworkData) C.int {
 		return C.ErrorParam
 	}
 	sock := serverCtx.GetSocket(cliId)
-	idx := int(chn)
+	idx := int(chnIdx)
 	if idx >= len(sock.Streams) {
 		slog.Info("无效的通道")
 		return C.Error
@@ -393,7 +393,7 @@ func ServerSocketSend(clientId *C.char, chn C.int, data *C.NetworkData) C.int {
 }
 
 //export ServerSocketReceive
-func ServerSocketReceive(clientId *C.char, chnId C.int, data *C.NetworkData) C.int {
+func ServerSocketReceive(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int {
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -406,13 +406,13 @@ func ServerSocketReceive(clientId *C.char, chnId C.int, data *C.NetworkData) C.i
 		return C.ErrorParam
 	}
 	sock := serverCtx.GetSocket(cliId)
-	channelIndex := int(chnId)
+	channelIndex := int(chnIdx)
 	err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
 	if !err {
 		return C.ErrorClose
 	}
 	currentBuffer := sock.CurrentBuffers[channelIndex]
-	//*chnId = C.int(currentBuffer.ChannelId)
+	//*chnIdx = C.int(currentBuffer.ChannelId)
 	bufferSize := len(currentBuffer.Data)
 	bufferMaxSize := int(data.len)
 	if bufferMaxSize == -1 { //为支持零拷贝，这里提供外部提供-1缓冲区长度的支持
