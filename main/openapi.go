@@ -393,7 +393,7 @@ func ServerSocketSend(clientId *C.char, chn C.int, data *C.NetworkData) C.int {
 }
 
 //export ServerSocketReceive
-func ServerSocketReceive(clientId *C.char, chnId *C.int, data *C.NetworkData) C.int {
+func ServerSocketReceive(clientId *C.char, chnId C.int, data *C.NetworkData) C.int {
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -406,14 +406,13 @@ func ServerSocketReceive(clientId *C.char, chnId *C.int, data *C.NetworkData) C.
 		return C.ErrorParam
 	}
 	sock := serverCtx.GetSocket(cliId)
-	//slog.Debug("准备从通道读取网络数据！")
-	channelIndex := 0
+	channelIndex := int(chnId)
 	err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
 	if !err {
 		return C.ErrorClose
 	}
 	currentBuffer := sock.CurrentBuffers[channelIndex]
-	*chnId = C.int(currentBuffer.ChannelId)
+	//*chnId = C.int(currentBuffer.ChannelId)
 	bufferSize := len(currentBuffer.Data)
 	bufferMaxSize := int(data.len)
 	if bufferMaxSize == -1 { //为支持零拷贝，这里提供外部提供-1缓冲区长度的支持
