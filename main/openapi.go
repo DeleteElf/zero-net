@@ -195,7 +195,7 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 }
 
 //export ClientChannelReceive
-func ClientChannelReceive(chnId C.int, data *C.NetworkData) C.int {
+func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 	//基于通道的读取方式，严格按外部提供的缓存大小来操作
 	if data == nil {
 		return C.ErrorParam
@@ -208,7 +208,7 @@ func ClientChannelReceive(chnId C.int, data *C.NetworkData) C.int {
 		slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
-	channelId := int(chnId)
+	channelId := int(chnIdx)
 	if channelId < 0 || channelId > clientCtx.ChannelCount {
 		slog.Warn("无效的通道Id！")
 		return C.ErrorParam
@@ -233,7 +233,7 @@ func ClientChannelReceive(chnId C.int, data *C.NetworkData) C.int {
 }
 
 //export ClientChannelSend
-func ClientChannelSend(channelId C.int, data *C.NetworkData) C.int {
+func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -245,7 +245,7 @@ func ClientChannelSend(channelId C.int, data *C.NetworkData) C.int {
 		slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
-	idx := int(channelId)
+	idx := int(chnIdx)
 	if idx >= clientCtx.ChannelCount {
 		slog.Warn("无效的通道Id!")
 		return C.Error
