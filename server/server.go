@@ -77,7 +77,7 @@ func NewServerByPort(port int, isAgent bool) *Server {
 }
 
 func (s *Server) OnClosing() bool {
-	slog.Debug("正在关闭基础连接")
+	slog.Debug("正在关闭服务端")
 	// 服务端先关闭，避免监听无法关闭
 	if s.netConn != nil {
 		_ = s.netConn.Close()
@@ -87,19 +87,17 @@ func (s *Server) OnClosing() bool {
 		_ = s.listener.Close()
 		s.listener = nil
 	}
-	slog.Debug("正在关闭socket")
 	for key, _ := range s.Sockets {
 		_ = s.CloseSocket(key)
 	}
 	s.Sockets = nil
-	//slog.Debug("正在关闭Accept")
-	//close(s.OnAccept)
+	close(s.OnAccept)
 	return true
 }
 
 func (s *Server) OnClosed() {
 	s.OnClosedSign <- true
-	//close(s.OnClosedSign)
+	close(s.OnClosedSign)
 	slog.Debug("服务端已经关闭")
 }
 
@@ -135,7 +133,7 @@ func (s *Server) StartListen() {
 		}
 		if err != nil {
 			slog.Warn("接入连接失败", slog.Any("err", err))
-			continue
+			break
 		}
 		slog.Info("接入一个新的连接", slog.Any("addr", quicConn.RemoteAddr()))
 		go s.acceptConnection(quicConn)
@@ -192,11 +190,11 @@ func (s *Server) processStream(stream *quic.Stream) {
 }
 func (s *Server) CloseSocket(id string) error {
 	s.lock.Lock()
+	defer s.lock.Unlock()
 	if s.Sockets[id] != nil {
 		s.Sockets[id].Close()
 		delete(s.Sockets, id)
 	}
-	s.lock.Unlock()
 	return nil
 }
 func (s *Server) GetSocket(id string) *streams.Socket {

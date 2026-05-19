@@ -266,11 +266,11 @@ func ServerCreate(config *C.NetworkData) C.int {
 
 //export ServerClose
 func ServerClose() C.int {
+	onAcceptSocket = nil
 	if serverCtx != nil {
 		serverCtx.Close()
 		serverCtx = nil
 	}
-	onAcceptSocket = nil
 	return C.Success
 }
 
@@ -291,15 +291,15 @@ func ServerSetOnAcceptSocket(callback C.AcceptSocket) C.int {
 	}
 	go func() {
 		for {
-			if onAcceptSocket == nil {
-				break
-			}
 			select {
-			case id := <-serverCtx.OnAccept:
-				//if onAcceptSocket != nil {
-				//	onAcceptSocket(C.CString(id))
-				//}
-				C.call_onAcceptSocket(C.CString(id), onAcceptSocket)
+			case id, ok := <-serverCtx.OnAccept:
+				if ok && onAcceptSocket != nil {
+					C.call_onAcceptSocket(C.CString(id), onAcceptSocket)
+				}
+			case closed := <-serverCtx.OnClosedSign:
+				if closed {
+					return
+				}
 			}
 		}
 	}()
