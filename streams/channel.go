@@ -91,7 +91,7 @@ func (sc *StreamChannel) HandleChannelStreamData(stream *quic.Stream) {
 		}
 		sc.Done = true
 	}()
-	slog.Debug("开始读取通道数据", slog.Int("channel", sc.ChannelId))
+	slog.Debug("完成流与通道的对接，开始读取通道数据", slog.Int("channel", sc.ChannelId))
 	for {
 		if sc.IsClosed {
 			return
@@ -138,4 +138,15 @@ func (sc *StreamChannel) ReceiveDataToBuffer() bool {
 		sc.Buffer = &buffer
 	}
 	return true
+}
+
+func (sc *StreamChannel) Send(data []byte) (bool, error) {
+	if sc.IsClosed {
+		return false, nil
+	}
+	if sc.Stream == nil {
+		return false, nil
+	}
+	err := utils.WriteStreamByHeaderUShort(sc.Stream, data)
+	return err == nil, err
 }

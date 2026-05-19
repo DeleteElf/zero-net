@@ -2,8 +2,9 @@ package tests
 
 import (
 	"fmt"
+	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/server"
-	"github.com/DeleteElf/network-quic/utils"
+	"github.com/DeleteElf/network-quic/streams"
 	"log/slog"
 	"testing"
 	"time"
@@ -17,12 +18,12 @@ func socketHandler(svr *server.Server, clientId string) {
 		slog.Error("客户端已经不存在！")
 		return
 	}
-	for i := 0; i < sock.Count; i++ {
+	for i := 0; i < sock.ChannelCount; i++ {
 		go messageHandler(svr, clientId, sock, i)
 	}
 }
 
-func messageHandler(svr *server.Server, clientId string, sock *server.Socket, channelIndex int) {
+func messageHandler(svr *server.Server, clientId string, sock *streams.Socket, channelIndex int) {
 	for {
 		if svr.IsClosed {
 			break
@@ -32,13 +33,14 @@ func messageHandler(svr *server.Server, clientId string, sock *server.Socket, ch
 			slog.Error("从缓存中获取接收数据失败！")
 			break
 		}
-		currentBuffer := sock.CurrentBuffers[channelIndex]
+		currentBuffer := sock.StreamChannels[channelIndex].Buffer
 		if currentBuffer == nil {
 			break
 		}
-		sock.CurrentBuffers[channelIndex] = nil
+		sock.StreamChannels[channelIndex].Buffer = nil
 		msg := string(currentBuffer.Data)
-		slog.Debug("收到数据：", slog.Int("channelId", currentBuffer.ChannelId), slog.String("msg", msg))
+		slog.Debug("收到数据：", slog.Int("channelId", currentBuffer.ChannelId), slog.String("msg", msg),
+			slog.String("clientId", currentBuffer.ClientId))
 		if msg == "bye" {
 			slog.Debug("收到结束会话命令！")
 			_ = svr.CloseSocket(clientId)
@@ -46,13 +48,14 @@ func messageHandler(svr *server.Server, clientId string, sock *server.Socket, ch
 			restart = false
 			slog.Debug("收到关闭命令！")
 			svr.Close()
+			return
 			//} else if msg == "restart" {
 			//	slog.Debug("收到重启命令！")
 			//	restart = true
 			//	svr.Close()
 		} else {
 			returnMsg := fmt.Sprintf("收到数据来自[%d]的数据：%s", currentBuffer.ChannelId, msg)
-			_, err2 := sock.Send(sock.Streams[currentBuffer.ChannelId], []byte(returnMsg))
+			_, err2 := sock.Send(currentBuffer.ChannelId, []byte(returnMsg))
 			if err2 != nil {
 				slog.Error(err2.Error())
 			}
@@ -79,6 +82,10 @@ func TestServer(t *testing.T) {
 				}
 				slog.Debug("新的客户端接入：", slog.String("id", id))
 				go socketHandler(svr, id)
+			case closed := <-svr.OnClosedSign:
+				if closed {
+					break
+				}
 			}
 			if svr.IsClosed {
 				break

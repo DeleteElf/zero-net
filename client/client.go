@@ -3,26 +3,26 @@ package client
 import (
 	"context"
 	"errors"
+	"github.com/DeleteElf/network-quic/framework"
+	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/streams"
 	"log/slog"
 	"net"
 	"time"
 
-	"github.com/DeleteElf/network-quic/utils"
 	"github.com/quic-go/quic-go"
 )
 
 // Client 客户端
 type Client struct {
-	Id           string
-	ChannelCount int
+	Id string
 	//需要连接的服务端地址
 	ServerAddress string
 	netConn       net.PacketConn
 	netAddr       net.Addr
 	quicConn      *quic.Conn
-	Streams       []*quic.Stream
-	streams.StreamChannelObject
+	Socket        *streams.Socket
+	framework.CloseableObject
 }
 
 // NewClient 创建客户端实例
@@ -31,8 +31,8 @@ func NewClient(addr string, id string) *Client {
 		ServerAddress: addr,
 		Id:            id,
 	}
+	cli.IsClosed = false
 	cli.SetOnCloseHandler(cli)
-	cli.IsClosed = true
 	return cli
 }
 
@@ -50,17 +50,9 @@ func newUdpSocketClient(serverAddr string) (net.PacketConn, net.Addr, error) {
 }
 
 func (cli *Client) OnClosing() bool {
-	for idx, stream := range cli.Streams {
-		if stream != nil {
-			slog.Info("quic close stream", slog.Int("channel", idx))
-			//stream.Context().Done()
-			//stream.CancelRead(quic.StreamErrorCode(0)) //结束读取
-			err := stream.Close() //结束发送
-			if err != nil {
-				slog.Error("quic close stream error", slog.Int("channel", idx))
-			}
-			cli.Streams[idx] = nil
-		}
+	if cli.Socket != nil {
+		cli.Socket.Close()
+		cli.Socket = nil
 	}
 	if cli.quicConn != nil {
 		err := cli.quicConn.CloseWithError(0, "close")
@@ -78,25 +70,21 @@ func (cli *Client) OnClosing() bool {
 }
 
 func (cli *Client) OnClosed() {
-	cli.ChannelCount = 0
 	slog.Debug("客户端已经关闭")
 }
 
 func (cli *Client) Connect(channelCount int, networkType string) error {
-	if cli.ChannelCount != 0 {
-		return errors.New("当前客户端通道数错误！")
-	}
 	if !cli.IsClosed {
+		return errors.New("当前客户端已经连接！")
+	}
+	if cli.Socket != nil {
 		return errors.New("当前客户端已经连接！")
 	}
 	if networkType != "udp" {
 		return errors.New("暂时只支持udp连接！")
 	}
 	cli.IsClosed = false
-	cli.ChannelCount = channelCount
-	cli.CurrentBuffers = make([]*streams.StreamChannelData, channelCount)
-	cli.Streams = make([]*quic.Stream, channelCount)
-	cli.CreateChannels(channelCount)
+	cli.Socket = streams.NewSocket(cli.Id, channelCount)
 	var err error
 	cli.netConn, cli.netAddr, err = newUdpSocketClient(cli.ServerAddress)
 	if err != nil {
@@ -136,8 +124,7 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 			cli.Close()
 			return err
 		}
-		cli.Streams[i] = stream
-		go cli.HandleChannelStreamData(cli.StreamChannels[i], i, stream)
+		go cli.Socket.HandleChannelStreamData(i, stream)
 	}
 	return nil
 }

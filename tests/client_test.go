@@ -2,8 +2,8 @@ package tests
 
 import (
 	"github.com/DeleteElf/network-quic/client"
+	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/streams"
-	"github.com/DeleteElf/network-quic/utils"
 	"log/slog"
 	"testing"
 	"time"
@@ -11,21 +11,21 @@ import (
 
 func receiveHandler(cli *client.Client, channelIndex int) {
 	slog.Info("正在准备接收数据", slog.Int("channel", channelIndex))
-	err := cli.ReceiveDataToBuffer(channelIndex)
+	err := cli.Socket.ReceiveDataToBuffer(channelIndex)
 	if !err {
 		slog.Error("ReceiveDataToBuffer error", slog.Any("err", err))
 		return
 	}
-	buffer := cli.CurrentBuffers[channelIndex]
+	buffer := cli.Socket.StreamChannels[channelIndex].Buffer
 	slog.Info("收到来自服务端的新消息", slog.Int("channel", channelIndex), slog.String("msg", string(buffer.Data)))
-	cli.CurrentBuffers[channelIndex] = nil
+	cli.Socket.StreamChannels[channelIndex].Buffer = nil
 	if channelIndex == 0 {
-		_, _ = cli.Send(cli.Streams[channelIndex], []byte("bye"))
+		_, _ = cli.Socket.Send(channelIndex, []byte("bye"))
 		//} else if channelIndex == 1 {
 		//	//time.Sleep(500 * time.Millisecond)
 		//	_, _ = cli.Send(cli.Streams[channelIndex], []byte("restart"))
 	} else if channelIndex == 2 {
-		_, _ = cli.Send(cli.Streams[channelIndex], []byte("shutdown"))
+		_, _ = cli.Socket.Send(channelIndex, []byte("shutdown"))
 	}
 }
 
@@ -39,20 +39,20 @@ func TestClient(t *testing.T) {
 		slog.Error("客户端连接失败", slog.Any("err", err))
 		return
 	}
-	slog.Info("客户端连接成功！", slog.Int("通道数", cli.ChannelCount))
-	for i := 0; i < cli.ChannelCount; i++ {
+	slog.Info("客户端连接成功！", slog.Int("通道数", cli.Socket.ChannelCount))
+	for i := 0; i < cli.Socket.ChannelCount; i++ {
 		go receiveHandler(cli, i)
 	}
 	msg0 := "hello,i am channel 0 data from client"
 	slog.Info("正在向通道0发送数据", slog.String("msg", msg0))
-	_, _ = cli.Send(cli.Streams[0], []byte(msg0))
+	_, _ = cli.Socket.Send(0, []byte(msg0))
 	msg1 := "hello,i am channel 1 data from client"
 	slog.Info("正在向通道1发送数据", slog.String("msg", msg1))
-	_, _ = cli.Send(cli.Streams[1], []byte(msg1))
+	_, _ = cli.Socket.Send(1, []byte(msg1))
 
 	msg2 := "hello,i am channel 2 data from client"
 	slog.Info("正在向通道2发送数据", slog.String("msg", msg2))
-	_, _ = cli.Send(cli.Streams[2], []byte(msg2))
+	_, _ = cli.Socket.Send(2, []byte(msg2))
 
 	time.Sleep(time.Second * 10)
 }

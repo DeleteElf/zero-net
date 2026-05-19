@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"github.com/DeleteElf/network-quic/framework"
+	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/streams"
-	"github.com/DeleteElf/network-quic/utils"
 	"github.com/quic-go/quic-go"
 	"log/slog"
 	"net"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -38,39 +40,16 @@ type Stream struct {
 	Server *Server
 }
 
-type Socket struct {
-	Id      string
-	Streams [MaxStreamCount]*quic.Stream
-	streams.StreamChannelObject
-	Count int
-}
-
-func (s *Socket) OnClosing() bool {
-	for idx, stream := range s.Streams {
-		if stream != nil {
-			slog.Info("正在关闭流", slog.String("id", s.Id), slog.Int("chn", idx))
-			_ = stream.Close()
-		}
-		s.Streams[idx] = nil
-	}
-	return true
-}
-
-func (s *Socket) OnClosed() {
-	slog.Debug("Socket已经关闭", slog.String("id", s.Id))
-}
-
 type Server struct {
-	//oneChannel     bool //这个功能存在问题
-	isAgent        bool
-	netConn        net.PacketConn
-	listener       *quic.Listener
-	sockets        map[string]*Socket
-	IsClosed       bool
-	onCloseHandler streams.OnCloseHandler
-	streams.Closeable
+	isAgent      bool
+	netConn      net.PacketConn
+	listener     *quic.Listener
+	Sockets      map[string]*streams.Socket
+	OnClosedSign chan bool
+	OnAccept     chan string
+	lock         sync.Mutex
 
-	OnAccept chan string
+	framework.CloseableObject
 }
 
 // NewServer 创建新的服务实例，根据设置的地址监听
@@ -81,13 +60,14 @@ func NewServer(address string, isAgent bool) *Server {
 		return nil
 	}
 	svr := &Server{
-		isAgent:  isAgent,
-		netConn:  netConn,
-		OnAccept: make(chan string),
-		sockets:  make(map[string]*Socket),
+		isAgent:      isAgent,
+		netConn:      netConn,
+		OnClosedSign: make(chan bool),
+		OnAccept:     make(chan string),
+		Sockets:      make(map[string]*streams.Socket),
 	}
-	svr.SetOnCloseHandler(svr)
 	svr.IsClosed = false
+	svr.SetOnCloseHandler(svr)
 	return svr
 }
 
@@ -108,45 +88,19 @@ func (s *Server) OnClosing() bool {
 		s.listener = nil
 	}
 	slog.Debug("正在关闭socket")
-	for key, _ := range s.sockets {
+	for key, _ := range s.Sockets {
 		_ = s.CloseSocket(key)
 	}
-	s.sockets = nil
-	slog.Debug("正在关闭Accept")
-	close(s.OnAccept)
+	s.Sockets = nil
+	//slog.Debug("正在关闭Accept")
+	//close(s.OnAccept)
 	return true
 }
 
 func (s *Server) OnClosed() {
+	s.OnClosedSign <- true
+	//close(s.OnClosedSign)
 	slog.Debug("服务端已经关闭")
-}
-
-// SetOnCloseHandler 设置关闭时需要执行的句柄
-func (s *Server) SetOnCloseHandler(handler streams.OnCloseHandler) {
-	s.onCloseHandler = handler
-}
-
-// Close 关闭流对象
-func (s *Server) Close() {
-	if !s.IsClosed { //防止多次执行
-		s.IsClosed = true
-		//开始释放资源
-		if s.onCloseHandler != nil {
-			if s.onCloseHandler.OnClosing() {
-				if s.listener != nil {
-					_ = s.listener.Close()
-					s.listener = nil
-				}
-				if s.sockets != nil {
-					for key, socket := range s.sockets {
-						socket.Close()
-						delete(s.sockets, key)
-					}
-				}
-				s.onCloseHandler.OnClosed()
-			}
-		}
-	}
 }
 
 func (s *Server) StartListen() {
@@ -189,10 +143,6 @@ func (s *Server) StartListen() {
 	slog.Info("服务停止监听")
 }
 
-func (s *Server) StopListen() {
-	s.Close()
-}
-
 func (s *Server) acceptConnection(quicConn *quic.Conn) {
 	defer func() {
 		slog.Info("连接断开", slog.Any("addr", quicConn.RemoteAddr()))
@@ -230,43 +180,28 @@ func (s *Server) processStream(stream *quic.Stream) {
 		_ = streams.CloseStream(stream)
 		return
 	}
-	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId))
-	if s.sockets[info.Id] == nil {
-		sock := &Socket{
-			Id:    info.Id,
-			Count: info.Count,
-			StreamChannelObject: streams.StreamChannelObject{
-				IsClosed: false,
-			},
-		}
-		sock.SetOnCloseHandler(sock)
-		//if s.oneChannel {
-		//	sock.CreateChannels(1)
-		//} else {
-		sock.CreateChannels(info.Count)
-		//}
-
-		s.sockets[info.Id] = sock
+	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId), slog.String("clientId", info.Id))
+	s.lock.Lock()
+	if s.Sockets[info.Id] == nil {
+		s.Sockets[info.Id] = streams.NewSocket(info.Id, info.Count)
 		s.OnAccept <- info.Id
 	}
-	socket := s.sockets[info.Id]
-	socket.Streams[info.Index] = stream
-	index := info.Index
-	//if s.oneChannel {
-	//	index = 0
-	//}
-	go socket.HandleChannelStreamData(socket.StreamChannels[index], info.Index, stream)
+	s.lock.Unlock()
+	socket := s.Sockets[info.Id]
+	go socket.HandleChannelStreamData(info.Index, stream)
 }
 func (s *Server) CloseSocket(id string) error {
-	if s.sockets[id] != nil {
-		s.sockets[id].Close()
-		delete(s.sockets, id)
+	s.lock.Lock()
+	if s.Sockets[id] != nil {
+		s.Sockets[id].Close()
+		delete(s.Sockets, id)
 	}
+	s.lock.Unlock()
 	return nil
 }
-func (s *Server) GetSocket(id string) *Socket {
-	if s.sockets[id] != nil {
-		return s.sockets[id]
+func (s *Server) GetSocket(id string) *streams.Socket {
+	if s.Sockets[id] != nil {
+		return s.Sockets[id]
 	}
 	return nil
 }
