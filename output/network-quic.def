@@ -1,9 +1,8 @@
 LIBRARY
 EXPORTS
-    InitLog
     InitLogCallback
+    InitNetwork
 
-    ClientCreate
     ClientClose
     ClientConnect
     ClientChannelReceive

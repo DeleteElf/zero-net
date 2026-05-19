@@ -106,34 +106,12 @@ var clientCtx *client.Client
 
 var g_log_level int = -1
 
-//export InitLog
-func InitLog(level C.int) {
-	g_log_level = int(level)
-	slogLevel := slog.LevelInfo
-	switch level {
-	case C.LevelFatal:
-		slogLevel = slog.LevelError
-	case C.LevelError:
-		slogLevel = slog.LevelError
-	case C.LevelWarn:
-		slogLevel = slog.LevelWarn
-	case C.LevelInfo:
-		slogLevel = slog.LevelInfo
-	case C.LevelDebug:
-		slogLevel = slog.LevelDebug
-	}
-	utils2.InitLog(slogLevel, nil)
-}
-
 var logCallback C.LogCallback
 
 type logCallbackWriter struct{}
 
 func (logCallbackWriter) Write(p []byte) (n int, err error) {
 	C.call_logCallback(C.CString(string(p)), logCallback)
-	//if logCallback != nil {
-	//	logCallback(C.CString(string(p)))
-	//}
 	return len(p), nil
 }
 
@@ -157,8 +135,8 @@ func InitLogCallback(level C.int, callback C.LogCallback) {
 	utils2.InitLog(slogLevel, logCallbackWriter{})
 }
 
-//export NetworkInit
-func NetworkInit() C.int {
+//export InitNetwork
+func InitNetwork() C.int {
 	slog.Info("log", slog.Int("level", g_log_level))
 	if g_log_level < 0 {
 		utils2.InitLog(slog.LevelDebug, nil)
@@ -292,6 +270,7 @@ func ServerClose() C.int {
 		serverCtx.Close()
 		serverCtx = nil
 	}
+	onAcceptSocket = nil
 	return C.Success
 }
 
