@@ -5,10 +5,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/DeleteElf/network-quic/framework/utils"
 	"log/slog"
 	"time"
 
-	"github.com/DeleteElf/network-quic/utils"
 	"github.com/quic-go/quic-go"
 )
 
@@ -97,30 +97,6 @@ func ReadStreamInfo(stream *quic.Stream) (*StreamInfo, error) {
 	var info StreamInfo
 	err = json.Unmarshal(jsonInfo, &info)
 	return &info, err
-}
-
-func ReadStreamData(stream *quic.Stream, data []byte) ([]byte, error) {
-	dataLen, err := ReadStreamLen(stream)
-	if err != nil {
-		return nil, err
-	}
-	if dataLen < 0 || (data == nil && dataLen > 10*1024*1024) || (data != nil && dataLen > int64(len(data))) {
-		streamId := stream.StreamID()
-		slog.Warn("quic stream recv len invalid", slog.Any("streamId", streamId), slog.Int64("dataLen", dataLen))
-		return nil, fmt.Errorf("invalid stream data")
-	}
-	if dataLen == 0 {
-		return nil, nil
-	}
-	if data == nil {
-		data = make([]byte, dataLen)
-	} else {
-		data = data[:dataLen]
-	}
-	if err := ReadStream(stream, data); err != nil {
-		return nil, err
-	}
-	return data, nil
 }
 
 func SendStreamData(stream *quic.Stream, buf []byte) error {
