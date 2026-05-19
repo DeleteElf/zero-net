@@ -36,6 +36,7 @@ enum NetworkResult {
     Error=80000,
     ErrorContext,
     ErrorParam,
+	ErrorSocket,
     ErrorBuffer,
     ErrorClose,
     Closed
@@ -216,14 +217,19 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
+
 	channelId := int(chnIdx)
 	_, err := clientCtx.Socket.ReceiveDataToBuffer(channelId) //这个会卡住等待
 	if err != nil {
 		slog.Warn(err.Error())
 		return C.ErrorClose
 	}
-
+	slog.Warn("开始接收数据！")
 	buffer := clientCtx.Socket.StreamChannels[channelId].Buffer
+	if buffer == nil {
+		return C.ErrorBuffer
+	}
+	slog.Warn("获取到缓存！")
 	//这一段的逻辑 也可以使用bufio.Reader来实现，如果是纯go，更佳，但我们需要转C，自己实现的逻辑性能更佳
 	bufferSize := len(buffer.Data)
 	bufferMaxSize := int(data.len)
@@ -231,6 +237,7 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 	C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(&buffer.Data[buffer.Offset]), C.size_t(copySize))
 	data.len = C.int(copySize)
 	buffer.Offset += copySize
+	slog.Warn("完成接收数据！")
 	if buffer.Offset >= bufferSize && channelId < clientCtx.Socket.ChannelCount {
 		clientCtx.Socket.StreamChannels[channelId].Buffer = nil
 	}
@@ -370,9 +377,13 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 		return C.ErrorParam
 	}
 	sock := serverCtx.GetSocket(cliId)
+	if sock == nil {
+		return C.ErrorSocket
+	}
 	success, err := sock.Send(int(chnIdx), FromBytes(data))
 	if err != nil {
 		slog.Error("写入流发生错误", slog.Any("err", err))
+		_ = serverCtx.CloseSocket(cliId)
 		return C.ErrorClose
 	}
 	if success {
@@ -449,6 +460,9 @@ func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkD
 		return C.ErrorParam
 	}
 	sock := serverCtx.GetSocket(cliId)
+	if sock == nil {
+		return C.ErrorSocket
+	}
 	channelIndex := int(chnIdx)
 	_, err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
 	if err != nil {

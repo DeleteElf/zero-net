@@ -28,9 +28,9 @@ func messageHandler(svr *server.Server, clientId string, sock *streams.Socket, c
 		if svr.IsClosed {
 			break
 		}
-		err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
-		if !err {
-			slog.Error("从缓存中获取接收数据失败！")
+		_, err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
+		if err != nil {
+			slog.Error(err.Error())
 			break
 		}
 		currentBuffer := sock.StreamChannels[channelIndex].Buffer

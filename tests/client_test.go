@@ -11,9 +11,9 @@ import (
 
 func receiveHandler(cli *client.Client, channelIndex int) {
 	slog.Info("正在准备接收数据", slog.Int("channel", channelIndex))
-	err := cli.Socket.ReceiveDataToBuffer(channelIndex)
-	if !err {
-		slog.Error("ReceiveDataToBuffer error", slog.Any("err", err))
+	_, err := cli.Socket.ReceiveDataToBuffer(channelIndex)
+	if err != nil {
+		slog.Error("ReceiveDataToBuffer error", slog.Any("err", err.Error()))
 		return
 	}
 	buffer := cli.Socket.StreamChannels[channelIndex].Buffer
@@ -25,7 +25,7 @@ func receiveHandler(cli *client.Client, channelIndex int) {
 		//	//time.Sleep(500 * time.Millisecond)
 		//	_, _ = cli.Send(cli.Streams[channelIndex], []byte("restart"))
 	} else if channelIndex == 2 {
-		_, _ = cli.Socket.Send(channelIndex, []byte("shutdown"))
+		//_, _ = cli.Socket.Send(channelIndex, []byte("shutdown"))
 	}
 }
 
