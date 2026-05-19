@@ -379,7 +379,6 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		return C.Success
 	}
 	if currentBuffer == nil {
-		slog.Debug("将数据从通道读入缓存！")
 		cases := make([]reflect.SelectCase, len(serverCtx.Sockets)*3)
 		index := 0
 		for _, sock := range serverCtx.Sockets { //将所有通道加入到列表
@@ -395,7 +394,6 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		buffer := value.Interface().(streams2.StreamChannelData)
 		currentBuffer = &buffer
 	}
-	slog.Debug("正在读取缓存数据！")
 	data.index = C.int(currentBuffer.ChannelId)
 	data.id = C.CString(currentBuffer.ClientId)
 
