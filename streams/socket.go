@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"errors"
 	"github.com/DeleteElf/network-quic/framework"
 	"github.com/quic-go/quic-go"
 	"log/slog"
@@ -56,20 +57,28 @@ func (s *Socket) HandleChannelStreamData(channelId int, stream *quic.Stream) {
 	s.StreamChannels[channelId].HandleChannelStreamData(stream)
 }
 
-func (s *Socket) ReceiveDataToBuffer(channelIndex int) bool {
+func (s *Socket) ReceiveDataToBuffer(channelId int) (bool, error) {
 	if len(s.StreamChannels) == 0 {
-		return false
+		return false, errors.New("当前socket的通道数为0！")
 	}
-	if s.StreamChannels[channelIndex] != nil {
-		s.StreamChannels[channelIndex].ReceiveDataToBuffer()
-		return true
+	if channelId >= s.ChannelCount {
+		return false, errors.New("超过通道允许范围！")
 	}
-	return false
+	if s.StreamChannels[channelId] != nil {
+		return s.StreamChannels[channelId].ReceiveDataToBuffer(), nil
+	}
+	return false, errors.New("通道未初始化！")
 }
 
 func (s *Socket) Send(channelId int, data []byte) (bool, error) {
 	if s.IsClosed {
 		return false, nil
+	}
+	if channelId >= s.ChannelCount {
+		return false, errors.New("超过通道允许范围！")
+	}
+	if s.StreamChannels[channelId] == nil {
+		return false, errors.New("通道未初始化！")
 	}
 	return s.StreamChannels[channelId].Send(data)
 }
