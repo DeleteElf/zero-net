@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"github.com/DeleteElf/network-quic/framework"
-	streams2 "github.com/DeleteElf/network-quic/framework/streams"
+	"github.com/DeleteElf/network-quic/framework/streams"
 	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/quic-go/quic-go"
 	"log/slog"
@@ -27,7 +27,7 @@ func newUdpSocketServer(addr string) (net.PacketConn, error) {
 		},
 	}
 	config.SetMultipathTCP(false)
-	conn, err := config.ListenPacket(context.Background(), streams2.STREAM_NETWORK_UDP, addr)
+	conn, err := config.ListenPacket(context.Background(), streams.STREAM_NETWORK_UDP, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func newUdpSocketServer(addr string) (net.PacketConn, error) {
 }
 
 type Stream struct {
-	Info   *streams2.StreamInfo
+	Info   *streams.StreamInfo
 	Stream *quic.Stream
 	Server *Server
 }
@@ -44,7 +44,7 @@ type Server struct {
 	isAgent      bool
 	netConn      net.PacketConn
 	listener     *quic.Listener
-	Sockets      map[string]*streams2.Socket
+	Sockets      map[string]*streams.Socket
 	OnClosedSign chan bool
 	OnAccept     chan string
 	lock         sync.Mutex
@@ -64,7 +64,7 @@ func NewServer(address string, isAgent bool) *Server {
 		netConn:      netConn,
 		OnClosedSign: make(chan bool),
 		OnAccept:     make(chan string),
-		Sockets:      make(map[string]*streams2.Socket),
+		Sockets:      make(map[string]*streams.Socket),
 	}
 	svr.IsClosed = false
 	svr.SetOnCloseHandler(svr)
@@ -164,26 +164,26 @@ func (s *Server) acceptConnection(quicConn *quic.Conn) {
 
 func (s *Server) processStream(stream *quic.Stream) {
 	streamId := stream.StreamID()
-	info, err := streams2.ReadStreamInfo(stream)
+	info, err := streams.ReadStreamInfo(stream)
 	if err != nil {
 		slog.Error("获取流信息失败", slog.Any("streamId", streamId), slog.Any("err", err))
-		_ = streams2.CloseStream(stream)
+		_ = streams.CloseStream(stream)
 		return
 	}
-	if err := streams2.ValidateStreamInfo(info); err != nil {
+	if err := streams.ValidateStreamInfo(info); err != nil {
 		slog.Warn("无效的流信息", slog.Any("err", err))
-		_ = streams2.CloseStream(stream)
+		_ = streams.CloseStream(stream)
 		return
 	}
 	if info.Index < 0 || info.Index >= MaxStreamCount {
 		slog.Error("无效的通道", slog.Any("chn", info.Index))
-		_ = streams2.CloseStream(stream)
+		_ = streams.CloseStream(stream)
 		return
 	}
 	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId), slog.String("clientId", info.Id))
 	s.lock.Lock()
 	if s.Sockets[info.Id] == nil {
-		s.Sockets[info.Id] = streams2.NewSocket(info.Id, info.Count)
+		s.Sockets[info.Id] = streams.NewSocket(info.Id, info.Count)
 		s.OnAccept <- info.Id
 	}
 	s.lock.Unlock()
@@ -199,7 +199,7 @@ func (s *Server) CloseSocket(id string) error {
 	s.lock.Unlock()
 	return nil
 }
-func (s *Server) GetSocket(id string) *streams2.Socket {
+func (s *Server) GetSocket(id string) *streams.Socket {
 	if s.Sockets[id] != nil {
 		return s.Sockets[id]
 	}

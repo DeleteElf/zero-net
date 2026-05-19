@@ -157,8 +157,8 @@ func InitLogCallback(level C.int, callback C.LogCallback) {
 	utils2.InitLog(slogLevel, logCallbackWriter{})
 }
 
-//export ClientCreate
-func ClientCreate() C.int {
+//export NetworkInit
+func NetworkInit() C.int {
 	slog.Info("log", slog.Int("level", g_log_level))
 	if g_log_level < 0 {
 		utils2.InitLog(slog.LevelDebug, nil)
@@ -272,11 +272,6 @@ func ServerCreate(config *C.NetworkData) C.int {
 	if config == nil {
 		return C.ErrorParam
 	}
-	slog.Info("log", slog.Int("level", g_log_level))
-	if g_log_level < 0 {
-		utils2.InitLog(slog.LevelDebug, nil)
-	}
-	InitProcess()
 
 	jsonObject, err := utils2.GetJsonObject(FromBytes(config))
 	if err != nil {
@@ -293,11 +288,10 @@ func ServerCreate(config *C.NetworkData) C.int {
 
 //export ServerClose
 func ServerClose() C.int {
-	if serverCtx == nil {
-		slog.Warn("未检索到有效的服务端！")
-		return C.ErrorContext
+	if serverCtx != nil {
+		serverCtx.Close()
+		serverCtx = nil
 	}
-	serverCtx = nil
 	return C.Success
 }
 
@@ -358,7 +352,7 @@ func ServerSocketClose(clientId *C.char) C.int {
 		slog.Warn("关闭socket失败！")
 		return C.ErrorClose
 	}
-	slog.Debug("执行关闭逻辑完成")
+	slog.Debug("socket执行关闭逻辑完成")
 	return C.Success
 }
 

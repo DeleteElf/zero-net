@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/DeleteElf/network-quic/framework"
-	streams2 "github.com/DeleteElf/network-quic/framework/streams"
+	"github.com/DeleteElf/network-quic/framework/streams"
 	"github.com/DeleteElf/network-quic/framework/utils"
 	"log/slog"
 	"net"
@@ -21,7 +21,7 @@ type Client struct {
 	netConn       net.PacketConn
 	netAddr       net.Addr
 	quicConn      *quic.Conn
-	Socket        *streams2.Socket
+	Socket        *streams.Socket
 	framework.CloseableObject
 }
 
@@ -38,11 +38,11 @@ func NewClient(addr string, id string) *Client {
 
 // 创建常规的网络接口，这个不对外暴露
 func newUdpSocketClient(serverAddr string) (net.PacketConn, net.Addr, error) {
-	svrAddr, err := net.ResolveUDPAddr(streams2.STREAM_NETWORK_UDP, serverAddr)
+	svrAddr, err := net.ResolveUDPAddr(streams.STREAM_NETWORK_UDP, serverAddr)
 	if err != nil {
 		return nil, svrAddr, err
 	}
-	conn, err := net.ListenUDP(streams2.STREAM_NETWORK_UDP, nil)
+	conn, err := net.ListenUDP(streams.STREAM_NETWORK_UDP, nil)
 	if err != nil {
 		return nil, svrAddr, err
 	}
@@ -55,16 +55,10 @@ func (cli *Client) OnClosing() bool {
 		cli.Socket = nil
 	}
 	if cli.quicConn != nil {
-		err := cli.quicConn.CloseWithError(0, "close")
-		if err != nil {
-			slog.Error("quic close quic connection error")
-		}
+		_ = cli.quicConn.CloseWithError(0, "close")
 	}
 	if cli.netConn != nil {
-		err := cli.netConn.Close()
-		if err != nil {
-			slog.Error("quic close net connection error")
-		}
+		_ = cli.netConn.Close()
 	}
 	return true
 }
@@ -80,7 +74,7 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 	if networkType != "udp" {
 		return errors.New("暂时只支持udp连接！")
 	}
-	cli.Socket = streams2.NewSocket(cli.Id, channelCount)
+	cli.Socket = streams.NewSocket(cli.Id, channelCount)
 	var err error
 	cli.netConn, cli.netAddr, err = newUdpSocketClient(cli.ServerAddress)
 	if err != nil {
@@ -90,32 +84,31 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 	}
 	tlsConfig := utils.GenTLSConfig()
 	quicConfig := &quic.Config{
-		MaxIncomingStreams:      0xffffffffffff,  // 最大默认stream输入，默认100
-		HandshakeIdleTimeout:    5 * time.Second, // 默认5s
-		MaxIdleTimeout:          5 * time.Second, // 默认30s
-		KeepAlivePeriod:         3 * time.Second, // 建议是 MaxIdleTimeout 的一半，或者更小的值
-		InitialPacketSize:       1500,            //当前最大数据包一个基础包的大小
+		MaxIncomingStreams:      0xffffffffffff,   // 最大默认stream输入，默认100
+		HandshakeIdleTimeout:    5 * time.Second,  // 默认5s
+		MaxIdleTimeout:          10 * time.Second, // 默认30s，我们这边设置成10秒
+		KeepAlivePeriod:         3 * time.Second,  // 建议是 MaxIdleTimeout 的一半，或者更小的值
+		InitialPacketSize:       1500,             //当前最大数据包一个基础包的大小
 		DisablePathMTUDiscovery: true,
 		Allow0RTT:               true,
 		// EnableDatagrams:    true,
 	}
-	slog.Info("quic dial", slog.Any("ServerAddress", cli.netAddr))
-
+	slog.Debug("正在建立远程连接", slog.Any("ServerAddress", cli.netAddr))
 	quicConn, err := quic.Dial(context.TODO(), cli.netConn, cli.netAddr, tlsConfig, quicConfig)
 	if err != nil {
-		slog.Info("quic dial fail", slog.Any("err", err))
+		slog.Info("远程连接失败！", slog.Any("err", err))
 		cli.Close()
 		return err
 	}
 	cli.quicConn = quicConn
-	info := streams2.StreamInfo{
+	info := streams.StreamInfo{
 		Id:    cli.Id,
 		Count: channelCount,
 		Ts:    time.Now().Unix(),
 	}
 	for i := 0; i < channelCount; i++ {
 		info.Index = i
-		stream, err := streams2.CreateStream(quicConn, info) //创建并打开流
+		stream, err := streams.CreateStream(quicConn, info) //创建并打开流
 		if err != nil {
 			cli.Close()
 			return err
