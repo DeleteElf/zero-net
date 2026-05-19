@@ -2,9 +2,9 @@ package tests
 
 import (
 	"fmt"
+	"github.com/DeleteElf/network-quic/framework/streams"
 	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/server"
-	"github.com/DeleteElf/network-quic/streams"
 	"log/slog"
 	"testing"
 	"time"

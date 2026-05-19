@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"github.com/DeleteElf/network-quic/framework"
+	streams2 "github.com/DeleteElf/network-quic/framework/streams"
 	"github.com/DeleteElf/network-quic/framework/utils"
-	"github.com/DeleteElf/network-quic/streams"
 	"log/slog"
 	"net"
 	"time"
@@ -21,7 +21,7 @@ type Client struct {
 	netConn       net.PacketConn
 	netAddr       net.Addr
 	quicConn      *quic.Conn
-	Socket        *streams.Socket
+	Socket        *streams2.Socket
 	framework.CloseableObject
 }
 
@@ -38,11 +38,11 @@ func NewClient(addr string, id string) *Client {
 
 // 创建常规的网络接口，这个不对外暴露
 func newUdpSocketClient(serverAddr string) (net.PacketConn, net.Addr, error) {
-	svrAddr, err := net.ResolveUDPAddr(streams.STREAM_NETWORK_UDP, serverAddr)
+	svrAddr, err := net.ResolveUDPAddr(streams2.STREAM_NETWORK_UDP, serverAddr)
 	if err != nil {
 		return nil, svrAddr, err
 	}
-	conn, err := net.ListenUDP(streams.STREAM_NETWORK_UDP, nil)
+	conn, err := net.ListenUDP(streams2.STREAM_NETWORK_UDP, nil)
 	if err != nil {
 		return nil, svrAddr, err
 	}
@@ -80,7 +80,7 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 	if networkType != "udp" {
 		return errors.New("暂时只支持udp连接！")
 	}
-	cli.Socket = streams.NewSocket(cli.Id, channelCount)
+	cli.Socket = streams2.NewSocket(cli.Id, channelCount)
 	var err error
 	cli.netConn, cli.netAddr, err = newUdpSocketClient(cli.ServerAddress)
 	if err != nil {
@@ -108,14 +108,14 @@ func (cli *Client) Connect(channelCount int, networkType string) error {
 		return err
 	}
 	cli.quicConn = quicConn
-	info := streams.StreamInfo{
+	info := streams2.StreamInfo{
 		Id:    cli.Id,
 		Count: channelCount,
 		Ts:    time.Now().Unix(),
 	}
 	for i := 0; i < channelCount; i++ {
 		info.Index = i
-		stream, err := streams.CreateStream(quicConn, info) //创建并打开流
+		stream, err := streams2.CreateStream(quicConn, info) //创建并打开流
 		if err != nil {
 			cli.Close()
 			return err

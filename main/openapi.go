@@ -58,9 +58,9 @@ static void call_onAcceptSocket(const char* id,AcceptSocket callback){
 import "C"
 import (
 	"github.com/DeleteElf/network-quic/client"
+	streams2 "github.com/DeleteElf/network-quic/framework/streams"
 	utils2 "github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/server"
-	"github.com/DeleteElf/network-quic/streams"
 	"log/slog"
 	"reflect"
 	"unsafe"
@@ -190,11 +190,11 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	address := jsonObject["address"].(string)
 	id := jsonObject["id"].(string)
 	networkType := jsonObject["networkType"].(string)
-	if networkType != streams.STREAM_NETWORK_UDP {
+	if networkType != streams2.STREAM_NETWORK_UDP {
 		return C.ErrorParam
 	}
-	clientCtx = client.NewClient(address, id)                              //尝试连接本机服务
-	err = clientCtx.Connect(int(channelCount), streams.STREAM_NETWORK_UDP) //创建udp网络
+	clientCtx = client.NewClient(address, id)                               //尝试连接本机服务
+	err = clientCtx.Connect(int(channelCount), streams2.STREAM_NETWORK_UDP) //创建udp网络
 	if err != nil {
 		slog.Error("客户端连接失败", slog.Any("err", err))
 		return C.ErrorClose
@@ -284,7 +284,7 @@ func ServerCreate(config *C.NetworkData) C.int {
 	}
 	address := jsonObject["address"].(string)
 	networkType := jsonObject["networkType"].(string)
-	if networkType != streams.STREAM_NETWORK_UDP {
+	if networkType != streams2.STREAM_NETWORK_UDP {
 		return C.ErrorParam
 	}
 	serverCtx = server.NewServer(address, false) //尝试连接本机服务
@@ -391,7 +391,7 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 	return C.Closed
 }
 
-var currentBuffer *streams.StreamChannelData
+var currentBuffer *streams2.StreamChannelData
 
 //export ServerSocketReceive
 func ServerSocketReceive(data *C.ClientData) C.int {
@@ -419,7 +419,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		if !ok {
 			return C.ErrorClose
 		}
-		buffer := value.Interface().(streams.StreamChannelData)
+		buffer := value.Interface().(streams2.StreamChannelData)
 		currentBuffer = &buffer
 	}
 	slog.Debug("正在读取缓存数据！")

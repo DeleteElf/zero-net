@@ -2,8 +2,8 @@ package tests
 
 import (
 	"github.com/DeleteElf/network-quic/client"
+	"github.com/DeleteElf/network-quic/framework/streams"
 	"github.com/DeleteElf/network-quic/framework/utils"
-	"github.com/DeleteElf/network-quic/streams"
 	"log/slog"
 	"testing"
 	"time"

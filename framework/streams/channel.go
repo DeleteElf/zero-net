@@ -1,6 +1,5 @@
 package streams
 
-import "C"
 import (
 	"context"
 	"errors"
