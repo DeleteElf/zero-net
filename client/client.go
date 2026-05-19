@@ -74,16 +74,12 @@ func (cli *Client) OnClosed() {
 }
 
 func (cli *Client) Connect(channelCount int, networkType string) error {
-	if !cli.IsClosed {
-		return errors.New("当前客户端已经连接！")
-	}
 	if cli.Socket != nil {
 		return errors.New("当前客户端已经连接！")
 	}
 	if networkType != "udp" {
 		return errors.New("暂时只支持udp连接！")
 	}
-	cli.IsClosed = false
 	cli.Socket = streams.NewSocket(cli.Id, channelCount)
 	var err error
 	cli.netConn, cli.netAddr, err = newUdpSocketClient(cli.ServerAddress)
