@@ -25,16 +25,21 @@ type CloseableObject struct {
 	Closeable
 }
 
+// SetOnCloseHandler 设置关闭时需要执行的句柄
+func (c *CloseableObject) SetOnCloseHandler(handler OnCloseHandler) {
+	c.onCloseHandler = handler
+}
+
 // Close 关闭流对象
-func (o *CloseableObject) Close() {
-	o.closeLock.Lock()
-	defer o.closeLock.Unlock()
-	if !o.IsClosed { //防止多次执行
+func (c *CloseableObject) Close() {
+	c.closeLock.Lock()
+	defer c.closeLock.Unlock()
+	if !c.IsClosed { //防止多次执行
 		//开始释放资源
-		if o.onCloseHandler != nil {
-			if o.onCloseHandler.OnClosing() {
-				o.IsClosed = true
-				o.onCloseHandler.OnClosed()
+		if c.onCloseHandler != nil {
+			if c.onCloseHandler.OnClosing() {
+				c.IsClosed = true
+				c.onCloseHandler.OnClosed()
 			}
 		}
 	}
