@@ -24,6 +24,13 @@ typedef struct _NetworkData {
     char *ptr;
 } NetworkData;
 
+typedef struct _ClientData {
+	char* id;
+	int index;
+    int len;
+    char* ptr;
+} ClientData;
+
 enum NetworkResult {
     Success = 0,
     Error=80000,
@@ -50,10 +57,11 @@ static void call_onAcceptSocket(const char* id,AcceptSocket callback){
 import "C"
 import (
 	"github.com/DeleteElf/network-quic/client"
+	utils2 "github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/server"
 	"github.com/DeleteElf/network-quic/streams"
-	"github.com/DeleteElf/network-quic/utils"
 	"log/slog"
+	"reflect"
 	"unsafe"
 )
 
@@ -113,7 +121,7 @@ func InitLog(level C.int) {
 	case C.LevelDebug:
 		slogLevel = slog.LevelDebug
 	}
-	utils.InitLog(slogLevel, nil)
+	utils2.InitLog(slogLevel, nil)
 }
 
 var logCallback C.LogCallback
@@ -145,14 +153,14 @@ func InitLogCallback(level C.int, callback C.LogCallback) {
 		slogLevel = slog.LevelDebug
 	}
 	logCallback = callback
-	utils.InitLog(slogLevel, logCallbackWriter{})
+	utils2.InitLog(slogLevel, logCallbackWriter{})
 }
 
 //export ClientCreate
 func ClientCreate() C.int {
 	slog.Info("log", slog.Int("level", g_log_level))
 	if g_log_level < 0 {
-		utils.InitLog(slog.LevelDebug, nil)
+		utils2.InitLog(slog.LevelDebug, nil)
 	}
 	InitProcess()
 	return C.Success
@@ -174,7 +182,7 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	if config == nil {
 		return C.ErrorParam
 	}
-	jsonObject, err := utils.GetJsonObject(FromBytes(config))
+	jsonObject, err := utils2.GetJsonObject(FromBytes(config))
 	if err != nil {
 		return C.ErrorParam
 	}
@@ -190,7 +198,7 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 		slog.Error("客户端连接失败", slog.Any("err", err))
 		return C.ErrorClose
 	}
-	slog.Info("客户端连接成功！", slog.Int("通道数", clientCtx.ChannelCount))
+	slog.Info("客户端连接成功！", slog.Int("通道数", clientCtx.Socket.ChannelCount))
 	return C.Success
 }
 
@@ -209,16 +217,13 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		return C.Closed
 	}
 	channelId := int(chnIdx)
-	if channelId < 0 || channelId > clientCtx.ChannelCount {
-		slog.Warn("无效的通道Id！")
-		return C.ErrorParam
-	}
-	err := clientCtx.ReceiveDataToBuffer(channelId) //这个会卡住等待
-	if !err {
+	_, err := clientCtx.Socket.ReceiveDataToBuffer(channelId) //这个会卡住等待
+	if err != nil {
+		slog.Warn(err.Error())
 		return C.ErrorClose
 	}
 
-	buffer := clientCtx.CurrentBuffers[channelId]
+	buffer := clientCtx.Socket.StreamChannels[channelId].Buffer
 	//这一段的逻辑 也可以使用bufio.Reader来实现，如果是纯go，更佳，但我们需要转C，自己实现的逻辑性能更佳
 	bufferSize := len(buffer.Data)
 	bufferMaxSize := int(data.len)
@@ -226,8 +231,8 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 	C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(&buffer.Data[buffer.Offset]), C.size_t(copySize))
 	data.len = C.int(copySize)
 	buffer.Offset += copySize
-	if buffer.Offset >= bufferSize && channelId < len(clientCtx.CurrentBuffers) {
-		clientCtx.CurrentBuffers[channelId] = nil
+	if buffer.Offset >= bufferSize && channelId < clientCtx.Socket.ChannelCount {
+		clientCtx.Socket.StreamChannels[channelId].Buffer = nil
 	}
 	return C.Success
 }
@@ -245,12 +250,7 @@ func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
 		slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
-	idx := int(chnIdx)
-	if idx >= clientCtx.ChannelCount {
-		slog.Warn("无效的通道Id!")
-		return C.Error
-	}
-	success, err := clientCtx.Send(clientCtx.Streams[idx], FromBytes(data))
+	success, err := clientCtx.Socket.Send(int(chnIdx), FromBytes(data))
 	if err != nil {
 		slog.Error("客户端发送数据发生错误", slog.Any("err", err))
 		return C.Error
@@ -268,11 +268,11 @@ func ServerCreate(config *C.NetworkData) C.int {
 	}
 	slog.Info("log", slog.Int("level", g_log_level))
 	if g_log_level < 0 {
-		utils.InitLog(slog.LevelDebug, nil)
+		utils2.InitLog(slog.LevelDebug, nil)
 	}
 	InitProcess()
 
-	jsonObject, err := utils.GetJsonObject(FromBytes(config))
+	jsonObject, err := utils2.GetJsonObject(FromBytes(config))
 	if err != nil {
 		return C.ErrorParam
 	}
@@ -333,7 +333,7 @@ func ServerStartListen() C.int {
 		slog.Warn("请先创建服务端实例！")
 		return C.ErrorContext
 	}
-	serverCtx.StartListen()
+	go serverCtx.StartListen()
 	return C.Success
 }
 
@@ -370,21 +370,10 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 		return C.ErrorParam
 	}
 	sock := serverCtx.GetSocket(cliId)
-	idx := int(chnIdx)
-	if idx >= len(sock.Streams) {
-		slog.Info("无效的通道")
-		return C.Error
-	}
-	stream := sock.Streams[idx]
-	if stream == nil {
-		slog.Info("无效的流")
-		return C.Error
-	}
-	buf := FromBytes(data)
-	success, err := sock.Send(stream, buf)
+	success, err := sock.Send(int(chnIdx), FromBytes(data))
 	if err != nil {
 		slog.Error("写入流发生错误", slog.Any("err", err))
-		return C.Error
+		return C.ErrorClose
 	}
 	if success {
 		return C.Success
@@ -392,8 +381,10 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 	return C.Closed
 }
 
+var currentBuffer *streams.StreamChannelData
+
 //export ServerSocketReceive
-func ServerSocketReceive(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int {
+func ServerSocketReceive(data *C.ClientData) C.int {
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -401,18 +392,30 @@ func ServerSocketReceive(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.
 		slog.Warn("请先创建服务端实例！")
 		return C.ErrorContext
 	}
-	cliId := C.GoString(clientId)
-	if len(cliId) == 0 {
-		return C.ErrorParam
+	if len(serverCtx.Sockets) == 0 {
+		return C.Success
 	}
-	sock := serverCtx.GetSocket(cliId)
-	channelIndex := int(chnIdx)
-	err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
-	if !err {
-		return C.ErrorClose
+	if currentBuffer == nil {
+		slog.Debug("将数据从通道读入缓存！")
+		cases := make([]reflect.SelectCase, len(serverCtx.Sockets)*3)
+		index := 0
+		for _, sock := range serverCtx.Sockets { //将所有通道加入到列表
+			for i := 0; i < sock.ChannelCount; i++ {
+				cases[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
+				index++
+			}
+		}
+		_, value, ok := reflect.Select(cases) //执行监听所有通道
+		if !ok {
+			return C.ErrorClose
+		}
+		buffer := value.Interface().(streams.StreamChannelData)
+		currentBuffer = &buffer
 	}
-	currentBuffer := sock.CurrentBuffers[channelIndex]
-	//*chnIdx = C.int(currentBuffer.ChannelId)
+	slog.Debug("正在读取缓存数据！")
+	data.index = C.int(currentBuffer.ChannelId)
+	data.id = C.CString(currentBuffer.ClientId)
+
 	bufferSize := len(currentBuffer.Data)
 	bufferMaxSize := int(data.len)
 	if bufferMaxSize == -1 { //为支持零拷贝，这里提供外部提供-1缓冲区长度的支持
@@ -427,7 +430,48 @@ func ServerSocketReceive(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.
 	}
 	currentBuffer.Offset += int(data.len)
 	if currentBuffer.Offset >= bufferSize {
-		sock.CurrentBuffers[channelIndex] = nil
+		currentBuffer = nil
+	}
+	return C.Success
+}
+
+//export ServerSocketChannelReceive
+func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int {
+	if data == nil {
+		return C.ErrorParam
+	}
+	if serverCtx == nil {
+		slog.Warn("请先创建服务端实例！")
+		return C.ErrorContext
+	}
+	cliId := C.GoString(clientId)
+	if len(cliId) == 0 {
+		return C.ErrorParam
+	}
+	sock := serverCtx.GetSocket(cliId)
+	channelIndex := int(chnIdx)
+	_, err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
+	if err != nil {
+		slog.Warn(err.Error())
+		return C.ErrorClose
+	}
+	buffer := sock.StreamChannels[channelIndex].Buffer
+	//*chnIdx = C.int(currentBuffer.ChannelId)
+	bufferSize := len(buffer.Data)
+	bufferMaxSize := int(data.len)
+	if bufferMaxSize == -1 { //为支持零拷贝，这里提供外部提供-1缓冲区长度的支持
+		bufferMaxSize = bufferSize
+		copySize := min(bufferSize-buffer.Offset, bufferMaxSize) //考虑到外部输入可能书写不严谨，零拷贝支持提供剩余的缓存
+		data.ptr = (*C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&buffer.Data[0])) + uintptr(buffer.Offset)))
+		data.len = C.int(copySize)
+	} else {
+		copySize := min(bufferSize-buffer.Offset, bufferMaxSize) //修改成根据缓冲区大小来读取数据
+		C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(uintptr(unsafe.Pointer(&buffer.Data[0]))+uintptr(buffer.Offset)), C.size_t(copySize))
+		data.len = C.int(copySize)
+	}
+	buffer.Offset += int(data.len)
+	if buffer.Offset >= bufferSize {
+		sock.StreamChannels[channelIndex].Buffer = nil
 	}
 	return C.Success
 }
