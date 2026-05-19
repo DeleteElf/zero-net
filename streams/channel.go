@@ -45,7 +45,6 @@ func NewStreamChannel(id string, index int) *StreamChannel {
 		Channel:   make(chan StreamChannelData),
 		ClientId:  id,
 		ChannelId: index,
-		Buffer:    &StreamChannelData{},
 		CloseableObject: framework.CloseableObject{
 			IsClosed: false,
 		},
@@ -77,7 +76,6 @@ func (sc *StreamChannel) OnClosing() bool {
 func (sc *StreamChannel) OnClosed() {
 	slog.Debug("检测到通道已经退出！", slog.String("id", sc.ClientId), slog.Int("通道", sc.ChannelId))
 	sc.Buffer = nil
-	sc.Channel = nil
 }
 
 // HandleChannelStreamData 从通道接收流的数据
@@ -132,7 +130,7 @@ func (sc *StreamChannel) ReceiveDataToBuffer() bool {
 	if sc.Buffer == nil { //当前缓存没有工作时
 		buffer, ok := <-sc.Channel
 		if !ok {
-			sc.Close()
+			//slog.Warn("通道已经关闭！")
 			return ok
 		}
 		sc.Buffer = &buffer

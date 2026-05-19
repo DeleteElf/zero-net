@@ -124,6 +124,9 @@ func WriteStreamByHeaderUShort(stream *quic.Stream, data []byte) error {
 
 // WriteStreamByHeaderType 将数据写入数据流，同时携带数据包长度作为报头，数据包长度类型根据输入headerType进行指定
 func WriteStreamByHeaderType(stream *quic.Stream, data []byte, headerType HeaderType) error {
+	if len(data) == 0 {
+		return nil
+	}
 	packetHeader := make([]byte, headerType)
 	switch headerType {
 	case UInt:
