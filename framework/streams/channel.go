@@ -25,6 +25,8 @@ type StreamChannelData struct {
 	Data      []byte
 }
 
+type MessageChannelCallbackFunc func(string, int)
+
 type StreamChannel struct {
 	Channel   chan StreamChannelData
 	ClientId  string
@@ -32,8 +34,10 @@ type StreamChannel struct {
 	Cancel    context.CancelFunc
 	Done      bool
 	Buffer    *StreamChannelData
+	Stream    *quic.Stream
 
-	Stream *quic.Stream
+	OnConnect    MessageChannelCallbackFunc
+	OnDisconnect MessageChannelCallbackFunc
 
 	framework.CloseableObject
 }
@@ -87,8 +91,14 @@ func (sc *StreamChannel) HandleChannelStreamData(stream *quic.Stream) {
 			sc.Channel = nil
 		}
 		sc.Done = true
+		if sc.OnDisconnect != nil {
+			sc.OnDisconnect(sc.ClientId, sc.ChannelId)
+		}
 	}()
 	slog.Debug("完成流与通道的对接，开始读取通道数据", slog.Int("channel", sc.ChannelId))
+	if sc.OnConnect != nil {
+		sc.OnConnect(sc.ClientId, sc.ChannelId)
+	}
 	for {
 		if sc.IsClosed {
 			return

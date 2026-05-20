@@ -7,17 +7,21 @@ import (
 	"log/slog"
 )
 
+type MessageCallbackFunc func(string)
+
 // Socket 流基础对象
 type Socket struct {
 	Id             string
 	StreamChannels []*StreamChannel
 	ChannelCount   int
 
+	OnDisconnect MessageCallbackFunc
+
 	framework.CloseableObject
 	StreamChannelOperating
 }
 
-func NewSocket(id string, channelCount int) *Socket {
+func NewSocket(id string, channelCount int, onDisconnect MessageCallbackFunc) *Socket {
 	sock := &Socket{
 		Id:           id,
 		ChannelCount: channelCount,
@@ -25,6 +29,7 @@ func NewSocket(id string, channelCount int) *Socket {
 	sock.IsClosed = false
 	sock.SetOnCloseHandler(sock)
 	sock.CreateChannels(channelCount)
+	sock.OnDisconnect = onDisconnect
 	return sock
 }
 
@@ -35,12 +40,16 @@ func (s *Socket) OnClosing() bool {
 			s.StreamChannels[i] = nil
 		}
 	}
+	s.ChannelCount = 0
 	s.StreamChannels = make([]*StreamChannel, 0) //清空切片
 	return true
 }
 
 func (s *Socket) OnClosed() {
 	slog.Debug("socket 已经退出！", slog.String("id", s.Id))
+	if s.OnDisconnect != nil {
+		s.OnDisconnect(s.Id)
+	}
 }
 
 // CreateChannels 创建通道

@@ -28,9 +28,18 @@ func messageHandler(svr *server.Server, clientId string, sock *streams.Socket, c
 		if svr.IsClosed {
 			break
 		}
+		if sock.IsClosed {
+			break
+		}
 		_, err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
 		if err != nil {
 			slog.Error(err.Error())
+			break
+		}
+		if svr.IsClosed {
+			break
+		}
+		if sock.IsClosed {
 			break
 		}
 		currentBuffer := sock.StreamChannels[channelIndex].Buffer
@@ -73,24 +82,13 @@ func TestServer(t *testing.T) {
 			slog.Debug("服务端重新启动监听！")
 			restart = false
 		}
-		go svr.StartListen()
-		for {
-			select {
-			case id := <-svr.OnAccept:
-				if len(id) == 0 {
-					break
-				}
-				slog.Debug("新的客户端接入：", slog.String("id", id))
-				go socketHandler(svr, id)
-			case closed := <-svr.OnClosedSign:
-				if closed {
-					break
-				}
-			}
-			if svr.IsClosed {
-				break
-			}
+		svr.OnAcceptSocket = func(id string) {
+			slog.Debug("新的客户端接入：", slog.String("id", id))
+			go socketHandler(svr, id)
 		}
+		svr.StartListen(func(id string) {
+			slog.Debug("客户端断开连接：", slog.String("id", id))
+		})
 		slog.Debug("服务端退出监听！")
 		if !restart {
 			break

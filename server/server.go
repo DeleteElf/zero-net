@@ -46,8 +46,11 @@ type Server struct {
 	listener     *quic.Listener
 	Sockets      map[string]*streams.Socket
 	OnClosedSign chan bool
-	OnAccept     chan string
-	lock         sync.Mutex
+
+	lock sync.Mutex
+
+	OnAcceptSocket       streams.MessageCallbackFunc
+	OnSocketDisConnected streams.MessageCallbackFunc
 
 	framework.CloseableObject
 }
@@ -63,7 +66,6 @@ func NewServer(address string, isAgent bool) *Server {
 		isAgent:      isAgent,
 		netConn:      netConn,
 		OnClosedSign: make(chan bool),
-		OnAccept:     make(chan string),
 		Sockets:      make(map[string]*streams.Socket),
 	}
 	svr.IsClosed = false
@@ -91,7 +93,6 @@ func (s *Server) OnClosing() bool {
 		_ = s.CloseSocket(key)
 	}
 	s.Sockets = nil
-	close(s.OnAccept)
 	return true
 }
 
@@ -101,7 +102,7 @@ func (s *Server) OnClosed() {
 	slog.Debug("服务端已经关闭")
 }
 
-func (s *Server) StartListen() {
+func (s *Server) StartListen(onDisconnect streams.MessageCallbackFunc) {
 	tlsConfig := utils.GenTLSConfig()
 	quicConfig := &quic.Config{
 		// MaxIncomingStreams: 0xffffffffffff, // 最大默认stream输入，默认100
@@ -136,12 +137,12 @@ func (s *Server) StartListen() {
 			break
 		}
 		slog.Info("接入一个新的连接", slog.Any("addr", quicConn.RemoteAddr()))
-		go s.acceptConnection(quicConn)
+		go s.acceptConnection(quicConn, onDisconnect)
 	}
 	slog.Info("服务停止监听")
 }
 
-func (s *Server) acceptConnection(quicConn *quic.Conn) {
+func (s *Server) acceptConnection(quicConn *quic.Conn, onDisconnect streams.MessageCallbackFunc) {
 	defer func() {
 		slog.Info("连接断开", slog.Any("addr", quicConn.RemoteAddr()))
 		_ = quicConn.CloseWithError(0, "other")
@@ -156,11 +157,11 @@ func (s *Server) acceptConnection(quicConn *quic.Conn) {
 			slog.Error("接入一个新的流发生错误", slog.Any("err", err))
 			return
 		}
-		go s.processStream(stream)
+		go s.processStream(stream, onDisconnect)
 	}
 }
 
-func (s *Server) processStream(stream *quic.Stream) {
+func (s *Server) processStream(stream *quic.Stream, onDisconnect streams.MessageCallbackFunc) {
 	streamId := stream.StreamID()
 	info, err := streams.ReadStreamInfo(stream)
 	if err != nil {
@@ -181,8 +182,10 @@ func (s *Server) processStream(stream *quic.Stream) {
 	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId), slog.String("clientId", info.Id))
 	s.lock.Lock()
 	if s.Sockets[info.Id] == nil {
-		s.Sockets[info.Id] = streams.NewSocket(info.Id, info.Count)
-		s.OnAccept <- info.Id
+		s.Sockets[info.Id] = streams.NewSocket(info.Id, info.Count, onDisconnect)
+		if s.OnAcceptSocket != nil {
+			s.OnAcceptSocket(info.Id)
+		}
 	}
 	s.lock.Unlock()
 	socket := s.Sockets[info.Id]

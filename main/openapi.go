@@ -16,9 +16,10 @@ enum LogLevel {
     // LevelTrace,
     LevelMax
 };
-//声明日志回调
-typedef void (*LogCallback)(const char*);
-typedef void (*AcceptSocket)(const char*);
+//声明消息回调
+typedef void (*MessageCallback)(const char*);
+typedef void (*MessageChannelCallback)(const char*,int);
+
 typedef struct _NetworkData {
     int len;
     char *ptr;
@@ -42,15 +43,15 @@ enum NetworkResult {
     Closed
 };
 
-static void call_logCallback(const char* msg,LogCallback callback){
+static void callMessageCallback(MessageCallback callback,const char* msg){
 	if(callback){
 		callback(msg);
 	}
 }
 
-static void call_onAcceptSocket(const char* id,AcceptSocket callback){
+static void callMessageChannelCallback(MessageCallback callback,const char* msg,int channelId){
 	if(callback){
-		callback(id);
+		callback(msg,channelId);
 	}
 }
 
@@ -106,8 +107,6 @@ var clientCtx *client.Client
 
 var g_log_level int = -1
 
-var logCallback C.LogCallback
-
 type logCallbackWriter struct{}
 
 func (logCallbackWriter) Write(p []byte) (n int, err error) {
@@ -115,8 +114,10 @@ func (logCallbackWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+var logCallback C.MessageCallback
+
 //export InitLogCallback
-func InitLogCallback(level C.int, callback C.LogCallback) {
+func InitLogCallback(level C.int, callback C.MessageCallback) {
 	g_log_level = int(level)
 	slogLevel := slog.LevelInfo
 	switch level {
@@ -171,8 +172,12 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	if networkType != streams2.STREAM_NETWORK_UDP {
 		return C.ErrorParam
 	}
-	clientCtx = client.NewClient(address, id)                               //尝试连接本机服务
-	err = clientCtx.Connect(int(channelCount), streams2.STREAM_NETWORK_UDP) //创建udp网络
+	clientCtx = client.NewClient(address, id) //尝试连接本机服务
+	err = clientCtx.Connect(int(channelCount), streams2.STREAM_NETWORK_UDP, func(id string) {
+		if onDisConnected != nil {
+			C.callMessageCallback(C.CString(id), onDisConnected)
+		}
+	}) //创建udp网络
 	if err != nil {
 		slog.Error("客户端连接失败", slog.Any("err", err))
 		return C.ErrorClose
@@ -261,6 +266,16 @@ func ServerCreate(config *C.NetworkData) C.int {
 		return C.ErrorParam
 	}
 	serverCtx = server.NewServer(address, false) //尝试连接本机服务
+	serverCtx.OnAcceptSocket = func(id string) {
+		if onAcceptSocket != nil {
+			C.callMessageCallback(C.CString(id), onAcceptSocket)
+		}
+	}
+	serverCtx.OnSocketDisConnected = func(id string) {
+		if onDisConnected != nil {
+			C.callMessageCallback(C.CString(id), onDisConnected)
+		}
+	}
 	return C.Success
 }
 
@@ -274,10 +289,10 @@ func ServerClose() C.int {
 	return C.Success
 }
 
-var onAcceptSocket C.AcceptSocket
+var onAcceptSocket C.MessageCallback
 
 //export ServerSetOnAcceptSocket
-func ServerSetOnAcceptSocket(callback C.AcceptSocket) C.int {
+func ServerSetOnAcceptSocket(callback C.MessageCallback) C.int {
 	if onAcceptSocket != nil && callback != nil {
 		return C.ErrorParam
 	}
@@ -286,23 +301,21 @@ func ServerSetOnAcceptSocket(callback C.AcceptSocket) C.int {
 		return C.ErrorContext
 	}
 	onAcceptSocket = callback
-	if onAcceptSocket == nil {
-		return C.Success
+	return C.Success
+}
+
+var onDisConnected C.MessageCallback
+
+//export ServerSetOnDisConnected
+func ServerSetOnDisConnected(callback C.MessageCallback) C.int {
+	if onDisConnected != nil && callback != nil {
+		return C.ErrorParam
 	}
-	go func() {
-		for {
-			select {
-			case id, ok := <-serverCtx.OnAccept:
-				if ok && onAcceptSocket != nil {
-					C.call_onAcceptSocket(C.CString(id), onAcceptSocket)
-				}
-			case closed := <-serverCtx.OnClosedSign:
-				if closed {
-					return
-				}
-			}
-		}
-	}()
+	if serverCtx == nil {
+		slog.Warn("请先创建服务端实例！")
+		return C.ErrorContext
+	}
+	onDisConnected = callback
 	return C.Success
 }
 
@@ -312,7 +325,11 @@ func ServerStartListen() C.int {
 		slog.Warn("请先创建服务端实例！")
 		return C.ErrorContext
 	}
-	go serverCtx.StartListen()
+	go serverCtx.StartListen(func(id string) {
+		if onDisConnected != nil {
+			C.callMessageCallback(C.CString(id), onDisConnected)
+		}
+	})
 	return C.Success
 }
 
@@ -438,6 +455,12 @@ func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkD
 	if err != nil {
 		slog.Warn(err.Error())
 		return C.ErrorClose
+	}
+	if sock.IsClosed { //优化如果过程中断开后继续
+		return C.Closed
+	}
+	if channelIndex >= sock.ChannelCount { //到这边说明是已经关闭了
+		return C.Closed
 	}
 	buffer := sock.StreamChannels[channelIndex].Buffer
 	//*chnIdx = C.int(currentBuffer.ChannelId)

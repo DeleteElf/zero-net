@@ -67,14 +67,14 @@ func (cli *Client) OnClosed() {
 	slog.Debug("客户端已经关闭")
 }
 
-func (cli *Client) Connect(channelCount int, networkType string) error {
+func (cli *Client) Connect(channelCount int, networkType string, onDisconnect streams.MessageCallbackFunc) error {
 	if cli.Socket != nil {
 		return errors.New("当前客户端已经连接！")
 	}
 	if networkType != "udp" {
 		return errors.New("暂时只支持udp连接！")
 	}
-	cli.Socket = streams.NewSocket(cli.Id, channelCount)
+	cli.Socket = streams.NewSocket(cli.Id, channelCount, onDisconnect)
 	var err error
 	cli.netConn, cli.netAddr, err = newUdpSocketClient(cli.ServerAddress)
 	if err != nil {
