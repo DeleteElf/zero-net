@@ -1,4 +1,4 @@
-package main
+package exports
 
 /*
 #cgo CFLAGS: -I ../output
@@ -422,7 +422,4 @@ func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkD
 		sock.StreamChannels[channelIndex].Buffer = nil
 	}
 	return C.Success
-}
-
-func main() {
 }
