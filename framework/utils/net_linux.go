@@ -4,6 +4,9 @@ import (
 	"syscall"
 )
 
+func InitProcess() {
+}
+
 func GetsockoptInt(fd uintptr, level, opt int) (int, error) {
 	return syscall.GetsockoptInt(int(fd), level, opt)
 }
