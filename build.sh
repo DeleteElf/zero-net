@@ -16,7 +16,7 @@ git pull
 
 echo 正在更新引用库
 GOROOT=../go
-GOPATH=../go/bin
+GOPATH=../go
 
 go mod tidy
 
