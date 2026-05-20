@@ -8,7 +8,4 @@
 
 #### FAQ
 1. 打包出现 go/pkg/tool/linux_amd64/link: running gcc failed: exit status 1
-解决办法： 升级ld
-```shell
-
-```
+解决办法： 查找跨平台兼容性问题，答案来自：gemini
