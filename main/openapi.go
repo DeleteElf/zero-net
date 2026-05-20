@@ -59,8 +59,8 @@ static void callMessageChannelCallback(MessageChannelCallback callback,const cha
 import "C"
 import (
 	"github.com/DeleteElf/network-quic/client"
-	streams2 "github.com/DeleteElf/network-quic/framework/streams"
-	utils2 "github.com/DeleteElf/network-quic/framework/utils"
+	"github.com/DeleteElf/network-quic/framework/streams"
+	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/server"
 	"log/slog"
 	"reflect"
@@ -111,16 +111,16 @@ func InitLogCallback(level C.int, callback C.MessageCallback) {
 		slogLevel = slog.LevelDebug
 	}
 	logCallback = callback
-	utils2.InitLog(slogLevel, logCallbackWriter{})
+	utils.InitLog(slogLevel, logCallbackWriter{})
 }
 
 //export InitNetwork
 func InitNetwork() C.int {
 	slog.Info("log", slog.Int("level", g_log_level))
 	if g_log_level < 0 {
-		utils2.InitLog(slog.LevelDebug, nil)
+		utils.InitLog(slog.LevelDebug, nil)
 	}
-	InitProcess()
+	utils.InitProcess()
 	return C.Success
 }
 
@@ -170,18 +170,18 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	if config == nil {
 		return C.ErrorParam
 	}
-	jsonObject, err := utils2.GetJsonObject(FromBytes(config))
+	jsonObject, err := utils.GetJsonObject(FromBytes(config))
 	if err != nil {
 		return C.ErrorParam
 	}
 	address := jsonObject["address"].(string)
 	id := jsonObject["id"].(string)
 	networkType := jsonObject["networkType"].(string)
-	if networkType != streams2.STREAM_NETWORK_UDP {
+	if networkType != streams.STREAM_NETWORK_UDP {
 		return C.ErrorParam
 	}
 	clientCtx = client.NewClient(address, id) //尝试连接本机服务
-	err = clientCtx.Connect(int(channelCount), streams2.STREAM_NETWORK_UDP, func(id string) {
+	err = clientCtx.Connect(int(channelCount), streams.STREAM_NETWORK_UDP, func(id string) {
 		if onDisConnected != nil {
 			C.callMessageCallback(onDisConnected, C.CString(id))
 		}
@@ -264,13 +264,13 @@ func ServerCreate(config *C.NetworkData) C.int {
 		return C.ErrorParam
 	}
 
-	jsonObject, err := utils2.GetJsonObject(FromBytes(config))
+	jsonObject, err := utils.GetJsonObject(FromBytes(config))
 	if err != nil {
 		return C.ErrorParam
 	}
 	address := jsonObject["address"].(string)
 	networkType := jsonObject["networkType"].(string)
-	if networkType != streams2.STREAM_NETWORK_UDP {
+	if networkType != streams.STREAM_NETWORK_UDP {
 		return C.ErrorParam
 	}
 	serverCtx = server.NewServer(address, false) //尝试连接本机服务
@@ -359,7 +359,7 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 	return C.Closed
 }
 
-var currentBuffer *streams2.StreamChannelData
+var currentBuffer *streams.StreamChannelData
 
 //export ServerSocketReceive
 func ServerSocketReceive(data *C.ClientData) C.int {
@@ -386,7 +386,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		if !ok {
 			return C.ErrorClose
 		}
-		buffer := value.Interface().(streams2.StreamChannelData)
+		buffer := value.Interface().(streams.StreamChannelData)
 		currentBuffer = &buffer
 	}
 	data.index = C.int(currentBuffer.ChannelId)
