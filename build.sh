@@ -26,3 +26,5 @@ echo 正在生成.a
 go build -buildmode=c-archive -ldflags="-s -w" -o ./output/libnetwork-quic.a ./main
 echo "完成时间：$(date)"
 
+
+
