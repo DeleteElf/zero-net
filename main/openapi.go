@@ -4,44 +4,7 @@ package main
 #cgo CFLAGS: -I ../output
 
 #include <string.h>
-//在Go1.6.2版本之后，Go的runtime 加入了指针违规传递检测机制。该机制主要针对Go向C传递带有指向其他Go内存的地址，具体见文献检查机制。
-//Go 1.25.9 支持自动将此处代码生成.h文件，因此，我们不再引用.h文件，而是将必须的内容书写在此
-
-enum LogLevel {
-    LevelFatal = 0,
-    LevelError,
-    LevelWarn,
-    LevelInfo,
-    LevelDebug,
-    // LevelTrace,
-    LevelMax
-};
-//声明消息回调
-typedef void (*MessageCallback)(const char*);
-typedef void (*MessageChannelCallback)(const char*,int);
-
-typedef struct _NetworkData {
-    int len;
-    char *ptr;
-} NetworkData;
-
-typedef struct _ClientData {
-	char* id;
-	int index;
-    int len;
-    char* ptr;
-} ClientData;
-
-enum NetworkResult {
-    Success = 0,
-    Error=80000,
-    ErrorContext,
-    ErrorParam,
-    ErrorSocket,
-    ErrorBuffer,
-    ErrorClose,
-    Closed
-};
+#include "network-quic.h"
 
 static void callMessageCallback(MessageCallback callback,const char* msg){
 	if(callback){
