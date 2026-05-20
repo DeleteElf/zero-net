@@ -49,7 +49,7 @@ static void callMessageCallback(MessageCallback callback,const char* msg){
 	}
 }
 
-static void callMessageChannelCallback(MessageCallback callback,const char* msg,int channelId){
+static void callMessageChannelCallback(MessageChannelCallback callback,const char* msg,int channelId){
 	if(callback){
 		callback(msg,channelId);
 	}
@@ -80,28 +80,6 @@ func FromBytes(data *C.NetworkData) []byte {
 	return []byte{}
 }
 
-func CopyBytes(src []byte, data *C.NetworkData) C.int {
-	srcLen := len(src)
-	if srcLen > int(data.len) { //如果来源数据比缓冲区大，则报错？不是说可以根据缓冲区大小读取数据吗？
-		data.len = C.int(srcLen)
-		return C.ErrorBuffer
-	}
-	C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(unsafe.SliceData(src)), C.size_t(srcLen))
-	data.len = C.int(srcLen)
-	return C.Success
-}
-
-func CopyStr(src string, data *C.NetworkData) C.int {
-	srcLen := len(src)
-	if srcLen > int(data.len) {
-		data.len = C.int(srcLen)
-		return C.ErrorBuffer
-	}
-	C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(unsafe.StringData(src)), C.size_t(srcLen))
-	data.len = C.int(srcLen)
-	return C.Success
-}
-
 var serverCtx *server.Server
 var clientCtx *client.Client
 
@@ -110,7 +88,7 @@ var g_log_level int = -1
 type logCallbackWriter struct{}
 
 func (logCallbackWriter) Write(p []byte) (n int, err error) {
-	C.call_logCallback(C.CString(string(p)), logCallback)
+	C.callMessageCallback(logCallback, C.CString(string(p)))
 	return len(p), nil
 }
 
@@ -146,6 +124,36 @@ func InitNetwork() C.int {
 	return C.Success
 }
 
+var onAcceptSocket C.MessageCallback
+
+//export SetOnAcceptSocketCallback
+func SetOnAcceptSocketCallback(callback C.MessageCallback) C.int {
+	if onAcceptSocket != nil && callback != nil {
+		return C.ErrorParam
+	}
+	if serverCtx == nil {
+		slog.Warn("请先创建服务端实例！")
+		return C.ErrorContext
+	}
+	onAcceptSocket = callback
+	return C.Success
+}
+
+var onDisConnected C.MessageCallback
+
+//export SetOnDisConnectedCallback
+func SetOnDisConnectedCallback(callback C.MessageCallback) C.int {
+	if onDisConnected != nil && callback != nil {
+		return C.ErrorParam
+	}
+	if serverCtx == nil {
+		slog.Warn("请先创建服务端实例！")
+		return C.ErrorContext
+	}
+	onDisConnected = callback
+	return C.Success
+}
+
 //export ClientClose
 func ClientClose() C.int {
 	if clientCtx == nil {
@@ -175,7 +183,7 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	clientCtx = client.NewClient(address, id) //尝试连接本机服务
 	err = clientCtx.Connect(int(channelCount), streams2.STREAM_NETWORK_UDP, func(id string) {
 		if onDisConnected != nil {
-			C.callMessageCallback(C.CString(id), onDisConnected)
+			C.callMessageCallback(onDisConnected, C.CString(id))
 		}
 	}) //创建udp网络
 	if err != nil {
@@ -268,12 +276,12 @@ func ServerCreate(config *C.NetworkData) C.int {
 	serverCtx = server.NewServer(address, false) //尝试连接本机服务
 	serverCtx.OnAcceptSocket = func(id string) {
 		if onAcceptSocket != nil {
-			C.callMessageCallback(C.CString(id), onAcceptSocket)
+			C.callMessageCallback(onAcceptSocket, C.CString(id))
 		}
 	}
 	serverCtx.OnSocketDisConnected = func(id string) {
 		if onDisConnected != nil {
-			C.callMessageCallback(C.CString(id), onDisConnected)
+			C.callMessageCallback(onDisConnected, C.CString(id))
 		}
 	}
 	return C.Success
@@ -289,36 +297,6 @@ func ServerClose() C.int {
 	return C.Success
 }
 
-var onAcceptSocket C.MessageCallback
-
-//export ServerSetOnAcceptSocket
-func ServerSetOnAcceptSocket(callback C.MessageCallback) C.int {
-	if onAcceptSocket != nil && callback != nil {
-		return C.ErrorParam
-	}
-	if serverCtx == nil {
-		slog.Warn("请先创建服务端实例！")
-		return C.ErrorContext
-	}
-	onAcceptSocket = callback
-	return C.Success
-}
-
-var onDisConnected C.MessageCallback
-
-//export ServerSetOnDisConnected
-func ServerSetOnDisConnected(callback C.MessageCallback) C.int {
-	if onDisConnected != nil && callback != nil {
-		return C.ErrorParam
-	}
-	if serverCtx == nil {
-		slog.Warn("请先创建服务端实例！")
-		return C.ErrorContext
-	}
-	onDisConnected = callback
-	return C.Success
-}
-
 //export ServerStartListen
 func ServerStartListen() C.int {
 	if serverCtx == nil {
@@ -327,7 +305,7 @@ func ServerStartListen() C.int {
 	}
 	go serverCtx.StartListen(func(id string) {
 		if onDisConnected != nil {
-			C.callMessageCallback(C.CString(id), onDisConnected)
+			C.callMessageCallback(onDisConnected, C.CString(id))
 		}
 	})
 	return C.Success

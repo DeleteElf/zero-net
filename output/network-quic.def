@@ -3,6 +3,9 @@ EXPORTS
     InitLogCallback
     InitNetwork
 
+    SetOnAcceptSocketCallback
+    SetOnDisConnectedCallback
+
     ClientClose
     ClientConnect
     ClientChannelReceive
@@ -10,8 +13,6 @@ EXPORTS
 
     ServerCreate
     ServerClose
-    ServerSetOnAcceptSocket
-    ServerSetOnDisConnected
     ServerStartListen
     ServerStopListen
     ServerSocketClose
