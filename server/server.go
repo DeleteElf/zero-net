@@ -21,7 +21,7 @@ func newUdpSocketServer(addr string) (net.PacketConn, error) {
 	config := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			err := c.Control(func(fd uintptr) {
-				_ = syscall.SetsockoptInt(syscall.Handle(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+				utils.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
 			})
 			return err
 		},
