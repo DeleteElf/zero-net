@@ -10,6 +10,7 @@ echo 正在删除旧版本
 rm -f ./output/libnetwork-quic.so
 rm -f ./output/libnetwork-quic.a
 
+
 git branch
 
 git pull
@@ -19,7 +20,8 @@ GOROOT=../go
 GOPATH=../go
 
 go mod tidy
-
+echo "跨平台兼容性预防处理,如果有这个文件会导致后续生成so文件失败！"
+rm -f ./main/app.syso
 echo 正在生成so
 go build -buildmode=c-shared -ldflags="-s -w" -o ./output/libnetwork-quic.so ./main
 echo 正在生成.a
