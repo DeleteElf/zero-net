@@ -1,6 +1,6 @@
 module github.com/DeleteElf/network-quic
 
-go 1.25.9
+go 1.25.0
 
 require (
 	github.com/quic-go/quic-go v0.59.1
