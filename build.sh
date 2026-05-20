@@ -14,6 +14,8 @@ git branch
 
 git pull
 
+echo 正在更新引用库
+
 ../../workspace/go/bin/go mod tidy
 
 echo 正在生成so
