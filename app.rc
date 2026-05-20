@@ -4,7 +4,7 @@
 #define VER_MAJOR 1
 #define VER_MINOR 0
 #define VER_PATCH 26
-#define VER_REVISION 051901
+#define VER_REVISION 052001
 
 #define MN "NetworkQuic"
 #define MD "Network quic plugin for C"
