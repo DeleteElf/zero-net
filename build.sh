@@ -19,6 +19,6 @@ git pull
 echo 正在生成so
 ../../workspace/go/bin/go build -buildmode=c-shared -ldflags="-s -w" -o ./output/libnetwork-quic.so ./main
 echo 正在生成.a
-../../workspace/go/bin/go build -buildmode=c-archive -ldflags="-s -w" -o ./outputlibnetwork-quic.a ./main
+../../workspace/go/bin/go build -buildmode=c-archive -ldflags="-s -w" -o ./output/libnetwork-quic.a ./main
 echo "完成时间：$(date)"
 
