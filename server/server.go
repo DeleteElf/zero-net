@@ -41,11 +41,10 @@ type Stream struct {
 }
 
 type Server struct {
-	isAgent      bool
-	netConn      net.PacketConn
-	listener     *quic.Listener
-	Sockets      map[string]*streams.Socket
-	OnClosedSign chan bool
+	isAgent  bool
+	netConn  net.PacketConn
+	listener *quic.Listener
+	Sockets  map[string]*streams.Socket
 
 	lock sync.Mutex
 
@@ -63,10 +62,9 @@ func NewServer(address string, isAgent bool) *Server {
 		return nil
 	}
 	svr := &Server{
-		isAgent:      isAgent,
-		netConn:      netConn,
-		OnClosedSign: make(chan bool),
-		Sockets:      make(map[string]*streams.Socket),
+		isAgent: isAgent,
+		netConn: netConn,
+		Sockets: make(map[string]*streams.Socket),
 	}
 	svr.IsClosed = false
 	svr.SetOnCloseHandler(svr)
@@ -97,8 +95,6 @@ func (s *Server) OnClosing() bool {
 }
 
 func (s *Server) OnClosed() {
-	s.OnClosedSign <- true
-	close(s.OnClosedSign)
 	slog.Debug("服务端已经关闭")
 }
 
@@ -182,7 +178,15 @@ func (s *Server) processStream(stream *quic.Stream, onDisconnect streams.Message
 	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId), slog.String("clientId", info.Id))
 	s.lock.Lock()
 	if s.Sockets[info.Id] == nil {
-		s.Sockets[info.Id] = streams.NewSocket(info.Id, info.Count, onDisconnect)
+		s.Sockets[info.Id] = streams.NewSocket(info.Id, info.Count, func(id string) {
+			if s.Sockets[info.Id] != nil {
+				s.Sockets[id] = nil
+				delete(s.Sockets, id)
+			}
+			if onDisconnect != nil {
+				onDisconnect(id)
+			}
+		})
 		if s.OnAcceptSocket != nil {
 			s.OnAcceptSocket(info.Id)
 		}
@@ -196,6 +200,7 @@ func (s *Server) CloseSocket(id string) error {
 	defer s.lock.Unlock()
 	if s.Sockets[id] != nil {
 		s.Sockets[id].Close()
+		s.Sockets[id] = nil
 		delete(s.Sockets, id)
 	}
 	return nil
