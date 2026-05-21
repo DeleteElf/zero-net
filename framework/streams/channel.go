@@ -62,7 +62,9 @@ func (sc *StreamChannel) OnClosing() bool {
 	}
 	sc.Cancel = nil
 	if sc.Stream != nil {
+		sc.Stream.CancelRead(0)
 		_ = sc.Stream.Close()
+		sc.Stream.CancelWrite(0)
 		sc.Stream = nil
 	}
 	count := 100
