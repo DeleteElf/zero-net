@@ -27,6 +27,7 @@ import (
 	"github.com/DeleteElf/network-quic/server"
 	"log/slog"
 	"reflect"
+	"time"
 	"unsafe"
 )
 
@@ -333,12 +334,20 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		slog.Warn("请先创建服务端实例！")
 		return C.ErrorContext
 	}
-	if len(serverCtx.Sockets) == 0 {
-		return C.Success
+	for {
+		if serverCtx.IsClosed { //如果等待的过程，结束了，则退出
+			return C.ErrorContext
+		}
+		if len(serverCtx.Sockets) == 0 { //如果还没有接入，则执行等待
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		break //正式工作
 	}
 	if currentBuffer == nil {
 		cases := make([]reflect.SelectCase, len(serverCtx.Sockets)*3)
 		index := 0
+		//slog.Debug("尝试获取缓存", slog.Int("socket数量", len(serverCtx.Sockets)))
 		for _, sock := range serverCtx.Sockets { //将所有通道加入到列表
 			for i := 0; i < sock.ChannelCount; i++ {
 				cases[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
@@ -350,7 +359,12 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 			return C.ErrorClose
 		}
 		buffer := value.Interface().(streams.StreamChannelData)
+		//slog.Debug("获取到缓存", slog.String("clientId", buffer.ClientId), slog.Int("channelId", buffer.ChannelId))
 		currentBuffer = &buffer
+	}
+	if len(currentBuffer.Data) == 0 {
+		slog.Debug("获取到缓存大小异常")
+		return C.ErrorBuffer
 	}
 	data.index = C.int(currentBuffer.ChannelId)
 	data.id = C.CString(currentBuffer.ClientId)
