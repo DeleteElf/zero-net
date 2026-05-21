@@ -1,6 +1,7 @@
 @echo off
 
 echo "执行时间：$(date)"
+export PATH=$PATH:/home/deleteelf/workspace-go/go
 
 echo "当前环境变量:${PATH}"
 
@@ -16,8 +17,6 @@ git branch
 git pull
 
 echo 正在更新引用库
-GOROOT=../go
-GOPATH=../go
 
 go mod tidy
 echo "跨平台兼容性预防处理,如果有这个文件会导致后续生成so文件失败！"
