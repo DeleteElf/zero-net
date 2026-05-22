@@ -28,8 +28,8 @@ func NewSocket(id string, channelCount int, onDisconnect MessageCallbackFunc) *S
 	}
 	sock.IsClosed = false
 	sock.SetOnCloseHandler(sock)
-	sock.CreateChannels(channelCount)
 	sock.OnDisconnect = onDisconnect
+	sock.CreateChannels(channelCount)
 	return sock
 }
 
@@ -57,6 +57,23 @@ func (s *Socket) CreateChannels(count int) {
 	s.StreamChannels = make([]*StreamChannel, count) //创建通道列表切片
 	for i := 0; i < count; i++ {
 		s.StreamChannels[i] = NewStreamChannel(s.Id, i) //make(chan StreamChannelData, 3) //创建通道实例
+		s.StreamChannels[i].OnDisconnect = func(id string, index int) {
+			slog.Debug("socket的通道断开连接！", slog.Int("index", index))
+			s.StreamChannels[i].Close()
+			s.StreamChannels[i] = nil
+			if s.OnDisconnect != nil {
+				finded := false
+				for _, channel := range s.StreamChannels {
+					if channel != nil {
+						finded = true
+					}
+				}
+				if !finded {
+					slog.Debug("socket的通道已全部断开连接！")
+					s.OnDisconnect(id)
+				}
+			}
+		}
 	}
 	s.ChannelCount = count
 }
