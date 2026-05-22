@@ -33,7 +33,9 @@ func TestClient(t *testing.T) {
 	utils.InitLog(slog.LevelDebug, nil)                  //初始化日志
 	cli := client.NewClient("127.0.0.1:10001", "test01") //尝试连接本机服务
 
-	err := cli.Connect(3, streams.STREAM_NETWORK_UDP, nil) //创建udp网络
+	err := cli.Connect(3, streams.STREAM_NETWORK_UDP, func(id string) {
+		cli.Socket.Close()
+	}) //创建udp网络
 
 	if err != nil {
 		slog.Error("客户端连接失败", slog.Any("err", err))
@@ -54,5 +56,12 @@ func TestClient(t *testing.T) {
 	slog.Info("正在向通道2发送数据", slog.String("msg", msg2))
 	_, _ = cli.Socket.Send(2, []byte(msg2))
 
-	time.Sleep(time.Second * 10)
+	//time.Sleep(time.Second * 3) //等待3秒，等他们通讯完成再退出
+	for {
+		if !cli.IsClosed && !cli.Socket.IsClosed {
+			time.Sleep(time.Millisecond * 10)
+		} else {
+			break
+		}
+	}
 }
