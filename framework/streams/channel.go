@@ -110,9 +110,10 @@ func (sc *StreamChannel) HandleChannelStreamData(stream *quic.Stream) {
 			if errors.Is(err, context.DeadlineExceeded) { //如果是读取超时，我们就继续即可
 				continue
 			} else if err != io.EOF {
-				slog.Error("通道读取失败！", slog.Int("ChannelId", sc.ChannelId), slog.Any("err", err))
+				//信息太频繁，不用一直提示
+				//slog.Error("通道读取失败！", slog.Int("ChannelId", sc.ChannelId), slog.Any("err", err))
 			} else {
-				slog.Error("通道流已经结束！", slog.Int("ChannelId", sc.ChannelId))
+				//slog.Error("通道流已经结束！", slog.Int("ChannelId", sc.ChannelId))
 			}
 			return
 		}

@@ -63,26 +63,24 @@ func (s *Socket) CreateChannels(count int) {
 	for i := 0; i < count; i++ {
 		s.StreamChannels[i] = NewStreamChannel(s.Id, i) //make(chan StreamChannelData, 3) //创建通道实例
 		s.StreamChannels[i].OnDisconnect = func(id string, index int) {
-			slog.Debug("socket的通道断开连接！", slog.Int("index", index))
-			{
+			if !s.IsClosed {
 				s.channelEditLock.Lock()
-				defer s.channelEditLock.Unlock()
 				if index < len(s.StreamChannels) && s.StreamChannels[index] != nil {
-
 					s.StreamChannels[index].Close()
-					s.StreamChannels[index] = nil
 				}
-			}
-			if s.OnDisconnect != nil {
-				finded := false
-				for _, channel := range s.StreamChannels {
-					if channel != nil {
-						finded = true
+				s.channelEditLock.Unlock()
+				if s.OnDisconnect != nil {
+					finded := false
+					for _, channel := range s.StreamChannels {
+						if channel != nil && !channel.IsClosed {
+							finded = true
+							break
+						}
 					}
-				}
-				if !finded {
-					slog.Debug("socket的通道已全部断开连接！")
-					s.Close()
+					if !finded {
+						slog.Debug("socket的通道已全部断开连接！")
+						s.Close()
+					}
 				}
 			}
 		}
