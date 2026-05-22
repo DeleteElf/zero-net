@@ -10,29 +10,10 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 )
 
 const MaxStreamCount = 6
-
-func newUdpSocketServer(addr string) (net.PacketConn, error) {
-	var err error
-	config := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
-			err := c.Control(func(fd uintptr) {
-				utils.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
-			})
-			return err
-		},
-	}
-	config.SetMultipathTCP(false)
-	conn, err := config.ListenPacket(context.Background(), streams.STREAM_NETWORK_UDP, addr)
-	if err != nil {
-		return nil, err
-	}
-	return conn, nil
-}
 
 type Stream struct {
 	Info   *streams.StreamInfo
@@ -56,7 +37,7 @@ type Server struct {
 
 // NewServer 创建新的服务实例，根据设置的地址监听
 func NewServer(address string, isAgent bool) *Server {
-	netConn, err := newUdpSocketServer(address)
+	netConn, err := streams.NewUdpSocketServer(address)
 	if err != nil {
 		slog.Error("创建socket服务失败！", slog.Any("err", err))
 		return nil
@@ -75,6 +56,10 @@ func NewServer(address string, isAgent bool) *Server {
 func NewServerByPort(port int, isAgent bool) *Server {
 	return NewServer("0.0.0.0:"+strconv.Itoa(port), isAgent)
 }
+
+//func NewAgentServer() *Server {
+//
+//}
 
 func (s *Server) OnClosing() bool {
 	slog.Debug("正在关闭服务端")

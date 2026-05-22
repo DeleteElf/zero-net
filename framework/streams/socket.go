@@ -1,14 +1,48 @@
 package streams
 
 import (
+	"context"
 	"errors"
 	"github.com/DeleteElf/network-quic/framework"
+	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/quic-go/quic-go"
 	"log/slog"
+	"net"
 	"sync"
+	"syscall"
 )
 
 type MessageCallbackFunc func(string)
+
+func NewUdpSocketClient(serverAddr string) (*net.UDPConn, net.Addr, error) {
+	svrAddr, err := net.ResolveUDPAddr(STREAM_NETWORK_UDP, serverAddr)
+	if err != nil {
+		return nil, svrAddr, err
+	}
+	conn, err := net.ListenUDP(STREAM_NETWORK_UDP, nil)
+	if err != nil {
+		return nil, svrAddr, err
+	}
+	return conn, svrAddr, nil
+}
+
+func NewUdpSocketServer(addr string) (net.PacketConn, error) {
+	var err error
+	config := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			err := c.Control(func(fd uintptr) {
+				utils.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+			})
+			return err
+		},
+	}
+	config.SetMultipathTCP(false)
+	conn, err := config.ListenPacket(context.Background(), STREAM_NETWORK_UDP, addr)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
 
 // Socket 流基础对象
 type Socket struct {

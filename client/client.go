@@ -36,19 +36,6 @@ func NewClient(addr string, id string) *Client {
 	return cli
 }
 
-// 创建常规的网络接口，这个不对外暴露
-func newUdpSocketClient(serverAddr string) (net.PacketConn, net.Addr, error) {
-	svrAddr, err := net.ResolveUDPAddr(streams.STREAM_NETWORK_UDP, serverAddr)
-	if err != nil {
-		return nil, svrAddr, err
-	}
-	conn, err := net.ListenUDP(streams.STREAM_NETWORK_UDP, nil)
-	if err != nil {
-		return nil, svrAddr, err
-	}
-	return conn, svrAddr, nil
-}
-
 func (cli *Client) OnClosing() bool {
 	if cli.Socket != nil {
 		cli.Socket.Close()
@@ -68,20 +55,25 @@ func (cli *Client) OnClosed() {
 }
 
 func (cli *Client) Connect(channelCount int, networkType string, onDisconnect streams.MessageCallbackFunc) error {
-	if cli.Socket != nil {
-		return errors.New("当前客户端已经连接！")
-	}
 	if networkType != "udp" {
 		return errors.New("暂时只支持udp连接！")
 	}
-	cli.Socket = streams.NewSocket(cli.Id, channelCount, onDisconnect)
 	var err error
-	cli.netConn, cli.netAddr, err = newUdpSocketClient(cli.ServerAddress)
+	netConn, netAddr, err := streams.NewUdpSocketClient(cli.ServerAddress)
 	if err != nil {
 		slog.Error("客户端连接服务器失败", slog.Any("err", err))
 		cli.Close()
 		return err
 	}
+	return cli.ConnectToNet(channelCount, netConn, netAddr, onDisconnect)
+}
+func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.Addr, onDisconnect streams.MessageCallbackFunc) error {
+	if cli.Socket != nil {
+		return errors.New("当前客户端已经连接！")
+	}
+	cli.netConn = conn
+	cli.netAddr = addr
+	cli.Socket = streams.NewSocket(cli.Id, channelCount, onDisconnect)
 	tlsConfig := utils.GenTLSConfig()
 	quicConfig := &quic.Config{
 		MaxIncomingStreams:      0xffffffffffff,   // 最大默认stream输入，默认100
@@ -95,6 +87,7 @@ func (cli *Client) Connect(channelCount int, networkType string, onDisconnect st
 	}
 	slog.Debug("正在建立远程连接", slog.Any("ServerAddress", cli.netAddr))
 	quicConn, err := quic.Dial(context.TODO(), cli.netConn, cli.netAddr, tlsConfig, quicConfig)
+
 	if err != nil {
 		slog.Info("远程连接失败！", slog.Any("err", err))
 		cli.Close()
@@ -115,5 +108,48 @@ func (cli *Client) Connect(channelCount int, networkType string, onDisconnect st
 		}
 		go cli.Socket.HandleChannelStreamData(i, stream)
 	}
+	return nil
+}
+func (cli *Client) ConnectToAgent(channelCount int, conn net.PacketConn, addr net.Addr, onDisconnect streams.MessageCallbackFunc) error {
+	if cli.Socket != nil {
+		return errors.New("当前客户端已经连接！")
+	}
+	cli.netConn = conn
+	cli.netAddr = addr
+	//cli.Socket = streams.NewSocket(cli.Id, channelCount, onDisconnect)
+	tlsConfig := utils.GenTLSConfig()
+	quicConfig := &quic.Config{
+		MaxIncomingStreams:      0xffffffffffff,   // 最大默认stream输入，默认100
+		HandshakeIdleTimeout:    5 * time.Second,  // 默认5s
+		MaxIdleTimeout:          10 * time.Second, // 默认30s，我们这边设置成10秒
+		KeepAlivePeriod:         3 * time.Second,  // 建议是 MaxIdleTimeout 的一半，或者更小的值
+		InitialPacketSize:       1500,             //当前最大数据包一个基础包的大小
+		DisablePathMTUDiscovery: true,
+		Allow0RTT:               true,
+		// EnableDatagrams:    true,
+	}
+	slog.Debug("正在建立远程连接", slog.Any("ServerAddress", cli.netAddr))
+	quicConn, err := quic.Dial(context.TODO(), cli.netConn, cli.netAddr, tlsConfig, quicConfig)
+
+	if err != nil {
+		slog.Info("远程连接失败！", slog.Any("err", err))
+		cli.Close()
+		return err
+	}
+	cli.quicConn = quicConn
+	//info := streams.StreamInfo{
+	//	Id:    cli.Id,
+	//	Count: channelCount,
+	//	Ts:    time.Now().Unix(),
+	//}
+	//for i := 0; i < channelCount; i++ {
+	//	info.Index = i
+	//	stream, err := streams.CreateStream(quicConn, info) //创建并打开流
+	//	if err != nil {
+	//		cli.Close()
+	//		return err
+	//	}
+	//	go cli.Socket.HandleChannelStreamData(i, stream)
+	//}
 	return nil
 }
