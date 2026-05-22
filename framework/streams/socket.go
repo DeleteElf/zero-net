@@ -5,6 +5,7 @@ import (
 	"github.com/DeleteElf/network-quic/framework"
 	"github.com/quic-go/quic-go"
 	"log/slog"
+	"sync"
 )
 
 type MessageCallbackFunc func(string)
@@ -19,6 +20,8 @@ type Socket struct {
 
 	framework.CloseableObject
 	StreamChannelOperating
+
+	channelEditLock sync.Mutex
 }
 
 func NewSocket(id string, channelCount int, onDisconnect MessageCallbackFunc) *Socket {
@@ -34,6 +37,8 @@ func NewSocket(id string, channelCount int, onDisconnect MessageCallbackFunc) *S
 }
 
 func (s *Socket) OnClosing() bool {
+	s.channelEditLock.Lock()
+	defer s.channelEditLock.Unlock()
 	for i := 0; i < len(s.StreamChannels); i++ {
 		if s.StreamChannels[i] != nil {
 			s.StreamChannels[i].Close()
@@ -59,8 +64,15 @@ func (s *Socket) CreateChannels(count int) {
 		s.StreamChannels[i] = NewStreamChannel(s.Id, i) //make(chan StreamChannelData, 3) //创建通道实例
 		s.StreamChannels[i].OnDisconnect = func(id string, index int) {
 			slog.Debug("socket的通道断开连接！", slog.Int("index", index))
-			s.StreamChannels[i].Close()
-			s.StreamChannels[i] = nil
+			{
+				s.channelEditLock.Lock()
+				defer s.channelEditLock.Unlock()
+				if index < len(s.StreamChannels) && s.StreamChannels[index] != nil {
+
+					s.StreamChannels[index].Close()
+					s.StreamChannels[index] = nil
+				}
+			}
 			if s.OnDisconnect != nil {
 				finded := false
 				for _, channel := range s.StreamChannels {
@@ -70,7 +82,7 @@ func (s *Socket) CreateChannels(count int) {
 				}
 				if !finded {
 					slog.Debug("socket的通道已全部断开连接！")
-					s.OnDisconnect(id)
+					s.Close()
 				}
 			}
 		}

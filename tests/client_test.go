@@ -16,16 +16,21 @@ func receiveHandler(cli *client.Client, channelIndex int) {
 		slog.Error("ReceiveDataToBuffer error", slog.Any("err", err.Error()))
 		return
 	}
+	if channelIndex >= len(cli.Socket.StreamChannels) {
+		return
+	}
 	buffer := cli.Socket.StreamChannels[channelIndex].Buffer
-	slog.Info("收到来自服务端的新消息", slog.Int("channel", channelIndex), slog.String("msg", string(buffer.Data)))
-	cli.Socket.StreamChannels[channelIndex].Buffer = nil
-	if channelIndex == 0 {
-		_, _ = cli.Socket.Send(channelIndex, []byte("bye"))
-		//} else if channelIndex == 1 {
-		//	//time.Sleep(500 * time.Millisecond)
-		//	_, _ = cli.Send(cli.Streams[channelIndex], []byte("restart"))
-	} else if channelIndex == 2 {
-		//_, _ = cli.Socket.Send(channelIndex, []byte("shutdown"))
+	if buffer != nil {
+		slog.Info("收到来自服务端的新消息", slog.Int("channel", channelIndex), slog.String("msg", string(buffer.Data)))
+		cli.Socket.StreamChannels[channelIndex].Buffer = nil
+		if channelIndex == 0 {
+			_, _ = cli.Socket.Send(channelIndex, []byte("bye"))
+			//} else if channelIndex == 1 {
+			//	//time.Sleep(500 * time.Millisecond)
+			//	_, _ = cli.Send(cli.Streams[channelIndex], []byte("restart"))
+		} else if channelIndex == 2 {
+			//_, _ = cli.Socket.Send(channelIndex, []byte("shutdown"))
+		}
 	}
 }
 
@@ -34,7 +39,7 @@ func TestClient(t *testing.T) {
 	cli := client.NewClient("127.0.0.1:10001", "test01") //尝试连接本机服务
 
 	err := cli.Connect(3, streams.STREAM_NETWORK_UDP, func(id string) {
-		cli.Socket.Close()
+		slog.Debug("socket已经断开===》！")
 	}) //创建udp网络
 
 	if err != nil {
