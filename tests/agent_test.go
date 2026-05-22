@@ -15,7 +15,7 @@ func TestHostAgent(t *testing.T) {
 		MgrAddr: "wss://192.168.199.159:3005/device?type=proxy&apikey=575D6618206A2754",
 		Hearts:  50,
 		Data: utils.JsonObject(map[string]interface{}{
-			"deviceId": "0A76DE8C-1AB1-35C3-A137-FC9E10B1EF9F",
+			"device_id": "0A76DE8C-1AB1-35C3-A137-FC9E10B1EF9F",
 		}),
 	}
 	mgr := agent.NewManagePlatform(cfg)
