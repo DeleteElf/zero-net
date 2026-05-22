@@ -1,0 +1,162 @@
+package agent
+
+import (
+	"encoding/binary"
+	"fmt"
+	"github.com/DeleteElf/network-quic/framework/streams"
+	"github.com/DeleteElf/network-quic/framework/utils"
+	"log/slog"
+	"net"
+	"strconv"
+	"time"
+)
+
+const (
+	// signSalt, 使用 openssl rand -hex 32 生成，可定期更换
+	SIGN_SALT = "f0bfa13d496c7c59b01263bd138eb8b2f59bce743549e1c84fe09f79a1093031"
+
+	ACTION_REG = "register"
+)
+
+type Proxy struct {
+	ProxyIp           string `json:"proxy_ip"`
+	ProxyPort         string `json:"proxy_port"`
+	ProxyExternalIp   string `json:"proxy_external_ip"`   //管理平台的外网ip
+	ProxyExternalPort string `json:"proxy_external_port"` //管理平台的外网端口
+	ProxyAddr         string //实际使用的地址
+	Idx               int    `json:"idx"`
+}
+
+type ActionProxy struct {
+	Success interface{} `json:"success"`
+	Type    string      `json:"type"` // 一般是json
+	Action  string      `json:"action"`
+	Data    Proxy       `json:"data"`
+}
+
+// PlatformActionInfo 连接管理平台的信息
+type PlatformActionInfo struct {
+	Action string           `json:"action"`
+	From   string           `json:"from"`
+	Info   utils.JsonObject `json:"info"`
+}
+
+func (a *ActionProxy) IsSuccess() bool {
+	if b, ok := a.Success.(bool); ok {
+		return b
+	}
+
+	if i, ok := a.Success.(int); ok {
+		return i != 0
+	}
+
+	if s, ok := a.Success.(string); ok {
+		if i, err := strconv.Atoi(s); err == nil {
+			return i != 0
+		} else {
+			return false
+		}
+	}
+	return false
+}
+func NewAgent(addr string, idx uint32, flag byte) (net.PacketConn, net.Addr, error) {
+	conn, proxyAddr, err := streams.NewUdpSocketClient(addr)
+	if err != nil {
+		return nil, nil, err
+	}
+	agentConn := &Socket{
+		udpConn: conn,
+		rData:   make([]byte, AGENT_PKG_SIZE),
+		wData:   make([]byte, AGENT_PKG_SIZE),
+	}
+	binary.LittleEndian.PutUint32(agentConn.wData, idx)
+
+	var head [AGENT_PEER_SIZE]byte
+	binary.LittleEndian.PutUint32(head[:], idx)
+	head[3] = (flag & PROXY_FLAG_DEST_SVR) | PROXY_FLAG_AUTH_SYN
+	copy(head[4:8], []byte(PROXY_MAGIC))
+	err = authAgent(conn, proxyAddr, head[:])
+	return agentConn, proxyAddr, err
+}
+
+type Auth struct {
+	Ts   int64  `json:"t"`
+	Ver  string `json:"v"` // 客户端的版本号
+	Sign string `json:"s"` // 客户端的签名，用于服务端校验客户端的合法性
+}
+
+func authAgent(conn net.PacketConn, proxyAddr net.Addr, head []byte) error {
+	buffer := make([]byte, 4096)
+	var strAddr string
+	for attempt := 1; attempt <= 3; attempt++ {
+		slog.Info("send syn", slog.Any("proxyAddr", proxyAddr))
+		_, err := conn.WriteTo(head, proxyAddr)
+		if err != nil {
+			return err
+		}
+		err = conn.SetReadDeadline(time.Now().Add(time.Second))
+		if err != nil {
+			slog.Info("SetReadDeadline", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
+			return err
+		}
+		n, _, err := conn.ReadFrom(buffer)
+		if err != nil {
+			slog.Info("ReadFrom", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
+			continue
+		}
+
+		strAddr = fmt.Sprintf("%d.%d.%d.%d:%d", buffer[4], buffer[5], buffer[6], buffer[7], binary.BigEndian.Uint16(buffer[8:]))
+
+		slog.Info("recv syn", slog.Any("proxyAddr", proxyAddr), slog.Any("data", buffer[:n]), slog.String("addr", strAddr))
+		break
+	}
+
+	if len(strAddr) == 0 {
+		return fmt.Errorf("timeout")
+	}
+
+	info := Auth{
+		Ts:  time.Now().Unix(),
+		Ver: PROXY_SIGN_VER,
+	}
+	info.Sign = utils.EncryptBytes([]byte(fmt.Sprintf("%s_%s_%d", strAddr, PROXY_SIGN_SALT, info.Ts)))
+	jsonInfo, err := utils.ToJsonByte(info)
+	if err != nil {
+		return err
+	}
+	data := make([]byte, AGENT_PEER_SIZE+len(jsonInfo))
+	copy(data[:AGENT_PEER_SIZE], head)
+	copy(data[AGENT_PEER_SIZE:], []byte(jsonInfo))
+	data[3] = (head[3] & PROXY_FLAG_DEST_SVR) | PROXY_FLAG_AUTH_REQ
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		slog.Info("send req", slog.Any("proxyAddr", proxyAddr))
+		_, err := conn.WriteTo(data, proxyAddr)
+		if err != nil {
+			return err
+		}
+
+		err = conn.SetReadDeadline(time.Now().Add(time.Second))
+		if err != nil {
+			slog.Info("SetReadDeadline", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
+			return err
+		}
+		n, _, err := conn.ReadFrom(buffer)
+		if err != nil {
+			slog.Info("ReadFrom", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
+			continue
+		}
+		if n < AGENT_PEER_SIZE || buffer[3] != data[3] {
+			continue
+		}
+
+		err = conn.SetReadDeadline(time.Time{})
+		if err != nil {
+			slog.Info("SetReadDeadline none", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
+			continue
+		}
+		slog.Info("recv req", slog.Any("proxyAddr", proxyAddr), slog.Any("data", buffer[:n]))
+		return nil
+	}
+	return fmt.Errorf("timeout")
+}
