@@ -4,18 +4,13 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/DeleteElf/network-quic/framework/utils"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
-	"time"
 )
 
 type Requst struct {
-	Ts      int64  `json:"ts"`        // 时间戳
-	Sign    string `json:"sign"`      // 鉴权，用于校验本次请求是否合法，**以防动态库被不可信第三方调用**
 	MgrAddr string `json:"mgr_addr"`  // 管理平台的地址
 	Token   string `json:"token"`     // 管理平台的token
 	DevId   string `json:"dev_id"`    // 管理平台的dev_id
@@ -31,59 +26,8 @@ type Requst struct {
 	DownBuf int    `json:"down_buf"` // TCP的下行缓冲区大小，默认64KB，此大小会影响吞吐、延迟
 }
 
-func CheckRequst(data []byte) (*Requst, error) {
-	var req Requst
-	if err := json.Unmarshal(data, &req); err != nil {
-		return nil, fmt.Errorf("req json %s unmarshal err:%v", string(data), err)
-	}
-	diffTs := time.Now().Unix() - req.Ts
-	if diffTs > 60 || diffTs < -60 {
-		slog.Warn("invalid ts", slog.Int64("ts", req.Ts))
-		return nil, fmt.Errorf("invalid ts")
-	}
-	if req.MgrAddr == "" {
-		return nil, fmt.Errorf("invalid mgr addr")
-	}
-	if req.Token == "" {
-		return nil, fmt.Errorf("invalid token")
-	}
-	if req.DevId == "" {
-		return nil, fmt.Errorf("invalid device id")
-	}
-	if req.ProxyId == "" {
-		return nil, fmt.Errorf("invalid proxy id")
-	}
-	if req.SvrAddr == "" {
-		return nil, fmt.Errorf("invalid server addr")
-	}
-	if req.CliId == "" {
-		return nil, fmt.Errorf("invalid client id")
-	}
-	if req.SvrAddr == "" {
-		return nil, fmt.Errorf("invalid service addr")
-	}
-	arr := strings.Split(req.SvcAddr, "://")
-	if len(arr) != 2 {
-		return nil, fmt.Errorf("invalid service addr")
-	}
-	req.SvcType = arr[0]
-	req.SvcAddr = arr[1]
-	if req.SvcType == "http" || req.SvcType == "https" || req.SvcType == "rtsp" {
-		req.NetType = "tcp"
-	} else {
-		req.NetType = req.SvcType
-	}
-	sign := utils.EncryptBytes([]byte(fmt.Sprintf("%s_%s_%d", req.SvrAddr, SIGN_SALT, req.Ts)))
-	if sign != req.Sign {
-		slog.Warn("invalid sign, but ignore for test")
-		// todo return nil, nil, fmt.Errorf("invalid sign")
-	}
-	slog.Info("requst", slog.Any("json", req))
-	return &req, nil
-}
-
-func GetProxy(req *Requst) (*Proxy, error) {
-	var proxy *Proxy = nil
+func GetProxy(req *Requst) (*ProxyInfo, error) {
+	var proxy *ProxyInfo = nil
 	if req.Proxy {
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},

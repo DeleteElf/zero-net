@@ -23,7 +23,7 @@ type Stream struct {
 
 type Server struct {
 	isAgent  bool
-	netConn  net.PacketConn
+	NetConn  net.PacketConn
 	listener *quic.Listener
 	Sockets  map[string]*streams.Socket
 
@@ -35,16 +35,26 @@ type Server struct {
 	framework.CloseableObject
 }
 
-// NewServer 创建新的服务实例，根据设置的地址监听
-func NewServer(address string, isAgent bool) *Server {
+// NewServerByAddress 创建新的服务实例，根据设置的地址监听
+func NewServerByAddress(address string) *Server {
 	netConn, err := streams.NewUdpSocketServer(address)
 	if err != nil {
 		slog.Error("创建socket服务失败！", slog.Any("err", err))
 		return nil
 	}
+	return NewServer(netConn, false)
+}
+
+// NewServerByPort 创建新的服务实例，并默认监听 0.0.0.0
+func NewServerByPort(port int) *Server {
+	return NewServerByAddress("0.0.0.0:" + strconv.Itoa(port))
+}
+
+// NewServer 创建新的服务实例
+func NewServer(conn net.PacketConn, isAgent bool) *Server {
 	svr := &Server{
 		isAgent: isAgent,
-		netConn: netConn,
+		NetConn: conn,
 		Sockets: make(map[string]*streams.Socket),
 	}
 	svr.IsClosed = false
@@ -52,21 +62,12 @@ func NewServer(address string, isAgent bool) *Server {
 	return svr
 }
 
-// NewServerByPort 创建新的服务实例，并默认监听 0.0.0.0
-func NewServerByPort(port int, isAgent bool) *Server {
-	return NewServer("0.0.0.0:"+strconv.Itoa(port), isAgent)
-}
-
-//func NewAgentServer() *Server {
-//
-//}
-
 func (s *Server) OnClosing() bool {
 	slog.Debug("正在关闭服务端")
 	// 服务端先关闭，避免监听无法关闭
-	if s.netConn != nil {
-		_ = s.netConn.Close()
-		s.netConn = nil
+	if s.NetConn != nil {
+		_ = s.NetConn.Close()
+		s.NetConn = nil
 	}
 	if s.listener != nil {
 		_ = s.listener.Close()
@@ -96,12 +97,12 @@ func (s *Server) StartListen(onDisconnect streams.MessageCallbackFunc) {
 	}
 
 	var err error
-	s.listener, err = quic.Listen(s.netConn, tlsConfig, quicConfig)
+	s.listener, err = quic.Listen(s.NetConn, tlsConfig, quicConfig)
 	if err != nil {
 		slog.Error("启动服务监听发生错误！", slog.Any("err", err))
 		return
 	}
-	slog.Info("服务启动监听", slog.Any("addr", s.netConn.LocalAddr()))
+	slog.Info("服务启动监听", slog.Any("addr", s.NetConn.LocalAddr()))
 	for {
 		if s.IsClosed { //已经关闭则退出
 			break

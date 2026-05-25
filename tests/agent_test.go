@@ -4,10 +4,22 @@ import (
 	"github.com/DeleteElf/network-quic/agent"
 	"github.com/DeleteElf/network-quic/client"
 	"github.com/DeleteElf/network-quic/framework/utils"
+	"github.com/DeleteElf/network-quic/server"
 	"log/slog"
 	"testing"
 	"time"
 )
+
+func agentSocketHandler(svr *server.Server, clientId string) {
+	sock := svr.GetSocket(clientId)
+	if sock == nil {
+		slog.Error("客户端已经不存在！")
+		return
+	}
+	for i := 0; i < sock.ChannelCount; i++ {
+		go messageHandler(svr, clientId, sock, i)
+	}
+}
 
 func TestHostAgent(t *testing.T) {
 	utils.InitLog(slog.LevelDebug, nil)
@@ -19,11 +31,22 @@ func TestHostAgent(t *testing.T) {
 		}),
 	}
 	mgr := agent.NewManagePlatform(cfg)
-
 	for {
-		if !mgr.IsClosed {
-			time.Sleep(time.Millisecond * 10)
-		} else {
+		if mgr.Server == nil { //等待创建
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		mgr.Server.OnAcceptSocket = func(id string) {
+			slog.Debug("新的客户端接入：", slog.String("id", id))
+			go agentSocketHandler(mgr.Server, id)
+		}
+		mgr.Server.StartListen(func(id string) {
+			slog.Debug("客户端断开连接：", slog.String("id", id))
+		})
+		slog.Debug("服务端退出监听！")
+		mgr.Server.Close()
+		mgr.Server = nil
+		if !restart {
 			break
 		}
 	}
@@ -38,7 +61,7 @@ func TestClientAgent(t *testing.T) {
 	//DevId:0A76DE8C-1AB1-35C3-A137-FC9E10B1EF9F
 	//ProxyId:A7C569D2-F0A7-7B0C-BB2A-E44D59D5A5EB
 	//SvrAddr:192.168.199.22
-	//Proxy:true
+	//ProxyInfo:true
 	//CliId:1a1f2dadcd90473bb684bcd02b9cc629
 	//NetType:udp
 	//SvcType:udp
@@ -61,15 +84,16 @@ func TestClientAgent(t *testing.T) {
 	}
 	proxy.ProxyAddr = proxy.ProxyIp + ":" + proxy.ProxyPort
 	cli := client.NewClient(proxy.ProxyAddr, request.CliId) //尝试连接本机服务
-	netConn, netAddr, err := agent.NewAgent(cli.ServerAddress, uint32(proxy.Idx), 0)
-	err = cli.ConnectToAgent(3, netConn, netAddr, func(id string) {
-		slog.Debug("socket已经断开===》！")
-	}) //创建udp网络
-	if err != nil {
-		slog.Error("客户端连接失败", slog.Any("err", err))
+	agt, err := agent.NewAgent(cli.ServerAddress, uint32(proxy.Idx), 0)
+	if err == nil && agt != nil {
+		cli.ConnectToAgent(3, agt.NetConn, agt.RemoteAddress, func(id string) {
+			slog.Debug("socket已经断开===》！")
+		}) //创建udp网络
+	}
+	if cli.Socket == nil {
+		slog.Info("客户端连接失败！")
 		return
 	}
-	slog.Info("客户端连接成功！", slog.Int("通道数", cli.Socket.ChannelCount))
 
 	for i := 0; i < cli.Socket.ChannelCount; i++ {
 		go receiveHandler(cli, i)

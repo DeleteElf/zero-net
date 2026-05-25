@@ -237,7 +237,7 @@ func ServerCreate(config *C.NetworkData) C.int {
 	if networkType != streams.STREAM_NETWORK_UDP {
 		return C.ErrorParam
 	}
-	serverCtx = server.NewServer(address, false) //尝试连接本机服务
+	serverCtx = server.NewServerByAddress(address) //尝试连接本机服务
 	serverCtx.OnAcceptSocket = func(id string) {
 		if onAcceptSocket != nil {
 			C.callMessageCallback(onAcceptSocket, C.CString(id))

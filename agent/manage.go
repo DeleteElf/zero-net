@@ -17,9 +17,6 @@ import (
 )
 
 type Config struct {
-	//Ts   int64  `json:"ts"`   // 时间戳
-	//Sign string `json:"sign"` // 鉴权，用于校验本次请求是否合法，**以防动态库被不可信第三方调用**
-	//EndPoint string      `json:"end_point"`
 	MgrAddr string           `json:"mgr_addr"`
 	Hearts  int              `json:"hearts"`
 	Data    utils.JsonObject `json:"data"`
@@ -39,6 +36,10 @@ type ManagePlatform struct {
 	//与管理平台之间的连接
 	wsConn *websocket.Conn
 	framework.CloseableObject
+	//平台对接的代理
+	Agents []*Agent
+	//平台对接的服务,一个平台只能一个服务,一个服务可以对接多个代理
+	Server *server.Server
 }
 
 func NewManagePlatform(cfg *Config) *ManagePlatform {
@@ -48,6 +49,7 @@ func NewManagePlatform(cfg *Config) *ManagePlatform {
 	}
 	mgr := &ManagePlatform{
 		AgentStreamChannel: make(chan AgentStream), //创建
+		Agents:             make([]*Agent, 0),      //创建代理空间
 	}
 	mgr.IsClosed = false
 	go func() {
@@ -164,29 +166,51 @@ func (mgr *ManagePlatform) connectToAgent(cfg *Config) error {
 			//slog.Debug("mgr resp", slog.String("action", proxy.Action))
 			continue
 		}
-		if len(proxy.Data.ProxyAddr) == 0 {
-			proxy.Data.ProxyAddr = proxy.Data.ProxyExternalIp + ":" + proxy.Data.ProxyExternalPort
-		}
-		slog.Debug("尝试连接的代理地址：", slog.String("address", proxy.Data.ProxyAddr))
-		if _, err := net.ResolveUDPAddr("udp", proxy.Data.ProxyAddr); err != nil {
-			slog.Info("mgr resp proxy invalid", slog.String("addr", proxy.Data.ProxyAddr), slog.Any("err", err))
-			continue
-		}
-		//if mgr.server == nil { //如果是与管理平台临时断开连接，我们这里不进行重连
-		slog.Debug("accept new proxy host connecting", slog.String("addr", proxy.Data.ProxyAddr), slog.Int("idx", proxy.Data.Idx))
 
-		netConn, _, err := NewAgent(proxy.Data.ProxyAddr, uint32(proxy.Data.Idx), 1)
-		if err != nil {
-			slog.Error("new server sock fail", slog.Any("err", err))
-			if netConn != nil {
-				netConn.Close()
-			}
-			return nil
+		proxyInfo := proxy.Data
+		if len(proxyInfo.ProxyAddr) == 0 {
+			proxyInfo.ProxyAddr = proxyInfo.ProxyIp + ":" + proxyInfo.ProxyPort
 		}
-		//startServer(true, &mgr.AgentStreamChannel, netConn)
-		slog.Debug("代理服务创建成功！")
+		count := 1
+		if proxyInfo.AllowExternal {
+			count = 2
+		}
+		for i := 0; i < count; i++ {
+			if len(proxyInfo.ProxyAddr) == 0 { //平台没有返回有效地址
+				continue
+			}
+
+			if i == 1 {
+				proxyInfo.ProxyAddr = proxyInfo.ProxyExternalIp + ":" + proxyInfo.ProxyExternalPort
+			}
+			slog.Debug("从管理平台获取的代理地址：", slog.String("address", proxyInfo.ProxyAddr))
+			if _, err := net.ResolveUDPAddr("udp", proxyInfo.ProxyAddr); err != nil {
+				slog.Info("mgr resp proxy invalid", slog.String("addr", proxyInfo.ProxyAddr), slog.Any("err", err))
+				continue
+			}
+			//if mgr.server == nil { //如果是与管理平台临时断开连接，我们这里不进行重连
+			slog.Debug("正在连接代理的预设地址...", slog.String("addr", proxyInfo.ProxyAddr), slog.Int("idx", proxyInfo.Idx))
+			agent, err := NewAgent(proxyInfo.ProxyAddr, uint32(proxyInfo.Idx), 1)
+			if err != nil {
+				slog.Error("连接代理失败", slog.Any("err", err))
+				if agent.NetConn != nil {
+					_ = agent.NetConn.Close()
+				}
+				continue
+			}
+			agent.Proxy = &proxyInfo
+			mgr.Agents = append(mgr.Agents, agent) //连接成功即可
+			if mgr.Server == nil {
+				mgr.Server = server.NewServer(agent.NetConn, true)
+			}
+			slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
+			break
+		}
+		//if mgr.Agent != nil {
+		//	slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
+		//} else {
+		//	slog.Debug("代理服务创建失败！", slog.Int("idx", proxyInfo.Idx))
 		//}
 	}
-	//mgr.server.Close()
 	return nil
 }

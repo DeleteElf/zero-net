@@ -14,7 +14,7 @@ import (
 
 // signSalt, 使用 openssl rand -hex 32 生成，每个版本不一样，定期删除过旧的版本
 const (
-	STREAM_SIGN_VER_NEWEST  = "1.0"
+	STREAM_SIGN_VER_NEWEST  = "1"
 	STREAM_SIGN_SALT_NEWEST = "fcfd186998e061eb3e297be7da42fe017fc8269f2963e2977502c676bae1068c"
 
 	STREAM_NETWORK_TCP = "tcp"

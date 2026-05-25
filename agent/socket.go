@@ -21,20 +21,20 @@ const (
 )
 
 type Socket struct {
-	udpConn *net.UDPConn
-	rData   []byte
-	wData   []byte
+	UdpConn   *net.UDPConn
+	ReadData  []byte
+	WriteData []byte
 }
 
 func (a *Socket) ReadFrom(p []byte) (int, net.Addr, error) {
-	dataLen, addr, err := a.udpConn.ReadFrom(a.rData)
-	// slog.Info("ReadFrom", slog.Any("proxyAddr", addr), slog.Any("data", a.rData[:dataLen]))
+	dataLen, addr, err := a.UdpConn.ReadFrom(a.ReadData)
+	// slog.Info("ReadFrom", slog.Any("proxyAddr", addr), slog.Any("data", a.ReadData[:dataLen]))
 	if dataLen <= AGENT_HEAD_SIZE {
 		return 0, addr, err
 	}
 
 	readLen := dataLen - AGENT_HEAD_SIZE
-	copy(p[0:readLen], a.rData[AGENT_HEAD_SIZE:dataLen])
+	copy(p[0:readLen], a.ReadData[AGENT_HEAD_SIZE:dataLen])
 	return readLen, addr, err
 }
 
@@ -44,9 +44,9 @@ func (a *Socket) WriteTo(p []byte, addr net.Addr) (int, error) {
 	if bufLen > AGENT_PKG_SIZE {
 		return -1, fmt.Errorf("too large")
 	}
-	copy(a.wData[AGENT_HEAD_SIZE:bufLen], p)
+	copy(a.WriteData[AGENT_HEAD_SIZE:bufLen], p)
 
-	writeLen, err := a.udpConn.WriteTo(a.wData[0:bufLen], addr)
+	writeLen, err := a.UdpConn.WriteTo(a.WriteData[0:bufLen], addr)
 	if writeLen < AGENT_HEAD_SIZE {
 		return writeLen, err
 	}
@@ -54,21 +54,21 @@ func (a *Socket) WriteTo(p []byte, addr net.Addr) (int, error) {
 }
 
 func (a *Socket) Close() error {
-	return a.udpConn.Close()
+	return a.UdpConn.Close()
 }
 
 func (a *Socket) LocalAddr() net.Addr {
-	return a.udpConn.LocalAddr()
+	return a.UdpConn.LocalAddr()
 }
 
 func (a *Socket) SetDeadline(t time.Time) error {
-	return a.udpConn.SetDeadline(t)
+	return a.UdpConn.SetDeadline(t)
 }
 
 func (a *Socket) SetReadDeadline(t time.Time) error {
-	return a.udpConn.SetReadDeadline(t)
+	return a.UdpConn.SetReadDeadline(t)
 }
 
 func (a *Socket) SetWriteDeadline(t time.Time) error {
-	return a.udpConn.SetWriteDeadline(t)
+	return a.UdpConn.SetWriteDeadline(t)
 }

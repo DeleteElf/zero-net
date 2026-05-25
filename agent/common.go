@@ -12,26 +12,24 @@ import (
 )
 
 const (
-	// signSalt, 使用 openssl rand -hex 32 生成，可定期更换
-	SIGN_SALT = "f0bfa13d496c7c59b01263bd138eb8b2f59bce743549e1c84fe09f79a1093031"
-
 	ACTION_REG = "register"
 )
 
-type Proxy struct {
+type ProxyInfo struct {
 	ProxyIp           string `json:"proxy_ip"`
 	ProxyPort         string `json:"proxy_port"`
 	ProxyExternalIp   string `json:"proxy_external_ip"`   //管理平台的外网ip
 	ProxyExternalPort string `json:"proxy_external_port"` //管理平台的外网端口
 	ProxyAddr         string //实际使用的地址
 	Idx               int    `json:"idx"`
+	AllowExternal     bool   `json:"allow_external"` //是否允许外网连接
 }
 
 type ActionProxy struct {
 	Success interface{} `json:"success"`
 	Type    string      `json:"type"` // 一般是json
 	Action  string      `json:"action"`
-	Data    Proxy       `json:"data"`
+	Data    ProxyInfo   `json:"data"`
 }
 
 // PlatformActionInfo 连接管理平台的信息
@@ -59,24 +57,46 @@ func (a *ActionProxy) IsSuccess() bool {
 	}
 	return false
 }
-func NewAgent(addr string, idx uint32, flag byte) (net.PacketConn, net.Addr, error) {
+
+type Agent struct {
+	NetConn *Socket
+	//当前代理的远程地址
+	RemoteAddress net.Addr
+	//当前主机的代理配置信息
+	Proxy *ProxyInfo
+}
+
+func NewAgent(addr string, idx uint32, flag byte) (*Agent, error) {
 	conn, proxyAddr, err := streams.NewUdpSocketClient(addr)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	agentConn := &Socket{
-		udpConn: conn,
-		rData:   make([]byte, AGENT_PKG_SIZE),
-		wData:   make([]byte, AGENT_PKG_SIZE),
+		UdpConn:   conn,
+		ReadData:  make([]byte, AGENT_PKG_SIZE),
+		WriteData: make([]byte, AGENT_PKG_SIZE),
 	}
-	binary.LittleEndian.PutUint32(agentConn.wData, idx)
+	binary.LittleEndian.PutUint32(agentConn.WriteData, idx)
 
 	var head [AGENT_PEER_SIZE]byte
 	binary.LittleEndian.PutUint32(head[:], idx)
 	head[3] = (flag & PROXY_FLAG_DEST_SVR) | PROXY_FLAG_AUTH_SYN
 	copy(head[4:8], []byte(PROXY_MAGIC))
 	err = authAgent(conn, proxyAddr, head[:])
-	return agentConn, proxyAddr, err
+	return &Agent{
+		NetConn:       agentConn,
+		RemoteAddress: proxyAddr,
+	}, err
+}
+
+func (agt *Agent) addAuth(idx uint32, flag byte) error {
+	binary.LittleEndian.PutUint32(agt.NetConn.WriteData, idx)
+
+	var head [AGENT_PEER_SIZE]byte
+	binary.LittleEndian.PutUint32(head[:], idx)
+	head[3] = (flag & PROXY_FLAG_DEST_SVR) | PROXY_FLAG_AUTH_SYN
+	copy(head[4:8], []byte(PROXY_MAGIC))
+	return authAgent(agt.NetConn, agt.RemoteAddress, head[:])
 }
 
 type Auth struct {
@@ -94,7 +114,7 @@ func authAgent(conn net.PacketConn, proxyAddr net.Addr, head []byte) error {
 		if err != nil {
 			return err
 		}
-		err = conn.SetReadDeadline(time.Now().Add(time.Second))
+		err = conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
 		if err != nil {
 			slog.Info("SetReadDeadline", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
 			return err
@@ -136,14 +156,14 @@ func authAgent(conn net.PacketConn, proxyAddr net.Addr, head []byte) error {
 			return err
 		}
 
-		err = conn.SetReadDeadline(time.Now().Add(time.Second))
+		err = conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
 		if err != nil {
 			slog.Info("SetReadDeadline", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
 			return err
 		}
 		n, _, err := conn.ReadFrom(buffer)
 		if err != nil {
-			slog.Info("ReadFrom", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
+			slog.Debug("ReadFrom", slog.Any("proxyAddr", proxyAddr), slog.Any("err", err))
 			continue
 		}
 		if n < AGENT_PEER_SIZE || buffer[3] != data[3] {

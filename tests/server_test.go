@@ -73,8 +73,8 @@ func messageHandler(svr *server.Server, clientId string, sock *streams.Socket, c
 }
 
 func TestServer(t *testing.T) {
-	utils.InitLog(slog.LevelDebug, nil)             //初始化日志
-	svr := server.NewServer("0.0.0.0:10001", false) //尝试连接本机服务
+	utils.InitLog(slog.LevelDebug, nil)               //初始化日志
+	svr := server.NewServerByAddress("0.0.0.0:10001") //尝试连接本机服务
 	//svr := server.NewServerByPort(10001, false) //尝试连接本机服务
 	for {
 		if restart {
