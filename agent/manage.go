@@ -18,9 +18,11 @@ import (
 type AgentMessageCallbackFunc func(int, string)
 
 type Config struct {
-	MgrAddr string           `json:"mgr_addr"`
-	Hearts  int              `json:"hearts"`
-	Data    utils.JsonObject `json:"data"`
+	MgrAddr  string           `json:"mgr_addr"`
+	Hearts   int              `json:"hearts"`
+	Data     utils.JsonObject `json:"data"`
+	Version  string           `json:"version" default:"1"`
+	SignSalt string           `json:"sign_salt" required:"true"`
 	//Port    int              `json:"port"` //因为代理中心的问题，暂时无法直接设置端口
 }
 
@@ -177,7 +179,7 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect Agent
 			proxyInfo.ProxyAddr = proxyInfo.ProxyIp + ":" + proxyInfo.ProxyPort
 		}
 		count := 1
-		if proxyInfo.AllowExternal {
+		if proxyInfo.AllowExternal { //如果允许外网连接
 			count = 2
 		}
 		for i := 0; i < count; i++ {
@@ -201,7 +203,7 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect Agent
 					continue
 				}
 				//agent, err := NewAgentService(mgr.Server.NetConn, proxyAddr, uint32(proxyInfo.Idx), 1)
-				agent, err := NewAgentService(conn, proxyAddr, uint32(proxyInfo.Idx), 1)
+				agent, err := NewAgentService(conn, proxyAddr, uint32(proxyInfo.Idx), 1, mgr.config)
 				if err != nil {
 					slog.Error("连接代理失败", slog.Any("err", err))
 					//if agent.NetConn != nil {
@@ -220,7 +222,7 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect Agent
 				})
 				slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
 				//} else {
-				//	_ = mgr.Agents[proxyInfo.Idx].AddAuthAgent(uint32(proxyInfo.Idx), 1)
+				//	_ = mgr.Agents[proxyInfo.Idx].addAuthAgent(uint32(proxyInfo.Idx), 1)
 				//	slog.Debug("代理服务已存在，继续使用！", slog.Int("idx", proxyInfo.Idx))
 			}
 			break

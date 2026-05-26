@@ -31,6 +31,8 @@ func TestHostAgent(t *testing.T) {
 			"device_id": "0A76DE8C-1AB1-35C3-A137-FC9E10B1EF9F",
 		}),
 		//Port: 48000,
+		Version:  "1",
+		SignSalt: "2fbbdf99eae1675484a48e8310db1ee42d3bd6fdbc5e3f3755af848b23cc9817",
 	}
 	mgr := agent.NewManagePlatform(cfg)
 	func() {
@@ -76,14 +78,14 @@ func TestHostAgent(t *testing.T) {
 	//}
 }
 
-func ConnectClientAgent(request *agent.Requst) *client.Client {
+func ConnectClientAgent(request *agent.Requst, config *agent.Config) *client.Client {
 	proxy, err := agent.GetProxy(request)
 	if err != nil {
 		return nil
 	}
 	proxy.ProxyAddr = proxy.ProxyIp + ":" + proxy.ProxyPort
 	cli := client.NewClient(proxy.ProxyAddr, request.CliId) //尝试连接本机服务
-	agt, err := agent.NewAgent(cli.ServerAddress, uint32(proxy.Idx), 0)
+	agt, err := agent.NewAgent(cli.ServerAddress, uint32(proxy.Idx), 0, config)
 	if err == nil && agt != nil {
 		sock := agt.Socket
 		cli.ConnectToAgent(3, sock, agt.RemoteAddress, func(id string) {
@@ -138,8 +140,11 @@ func TestClientAgent(t *testing.T) {
 		CliId:   "1a1f2dadcd90473bb684bcd02b9cc629",
 		NetType: "udp",
 	}
-	cli := ConnectClientAgent(request)
-
+	cfg := &agent.Config{
+		Version:  "1",
+		SignSalt: "2fbbdf99eae1675484a48e8310db1ee42d3bd6fdbc5e3f3755af848b23cc9817",
+	}
+	cli := ConnectClientAgent(request, cfg)
 	for {
 		if cli.IsClosed {
 			break
@@ -147,7 +152,6 @@ func TestClientAgent(t *testing.T) {
 		_, _ = cli.Socket.Ping(0)
 		time.Sleep(5 * time.Millisecond)
 	}
-	//time.Sleep(time.Second * 10)
 }
 
 func TestMultiClientAgent(t *testing.T) {
@@ -162,10 +166,13 @@ func TestMultiClientAgent(t *testing.T) {
 		CliId:   "1a1f2dadcd90473bb684bcd02b9cc629",
 		NetType: "udp",
 	}
-
+	cfg := &agent.Config{
+		Version:  "1",
+		SignSalt: "2fbbdf99eae1675484a48e8310db1ee42d3bd6fdbc5e3f3755af848b23cc9817",
+	}
 	for i := 0; i < 3; i++ {
 		request.CliId += strconv.Itoa(i)
-		ConnectClientAgent(request)
+		ConnectClientAgent(request, cfg)
 	}
 	time.Sleep(time.Second * 10)
 }

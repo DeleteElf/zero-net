@@ -13,12 +13,7 @@ import (
 )
 
 const (
-	ACTION_REG = "register"
-	// PROXY_SIGN_VER 代理中心需要配置支持 版本和校验码
-	PROXY_SIGN_VER = "1"
-	// PROXY_SIGN_SALT 代理中心需要配置支持 版本和校验码
-	PROXY_SIGN_SALT = "2fbbdf99eae1675484a48e8310db1ee42d3bd6fdbc5e3f3755af848b23cc9817"
-
+	ACTION_REG      = "register"
 	AGENT_PKG_SIZE  = 4096
 	AGENT_HEAD_SIZE = 4
 	AGENT_PEER_SIZE = 16
@@ -36,7 +31,7 @@ type ProxyInfo struct {
 	ProxyExternalPort string `json:"proxy_external_port"` //管理平台的外网端口
 	ProxyAddr         string //实际使用的地址
 	Idx               int    `json:"idx"`
-	AllowExternal     bool   `json:"allow_external"` //是否允许外网连接
+	AllowExternal     bool   `json:"allow_external" default:"false"` //是否允许外网连接
 }
 
 type ActionProxy struct {
@@ -82,29 +77,33 @@ type Agent struct {
 	//当前主机的代理配置信息
 	Proxy  *ProxyInfo
 	Server *server.Server
+	Config *Config
 }
 
-func NewAgentService(conn net.PacketConn, proxyAddr net.Addr, idx uint32, flag byte) (*Agent, error) {
+// NewAgentService 创建新的代理服务，支持客户端和服务端
+func NewAgentService(conn net.PacketConn, proxyAddr net.Addr, idx uint32, flag byte, config *Config) (*Agent, error) {
 	agt := &Agent{
 		NetConn:       conn,
 		RemoteAddress: proxyAddr,
+		Config:        config,
 	}
-	err := agt.AddAuthAgent(idx, flag)
+	err := agt.addAuthAgent(idx, flag)
 	if err != nil {
 		return nil, err
 	}
 	return agt, err
 }
 
-func NewAgent(addr string, idx uint32, flag byte) (*Agent, error) {
+// NewAgent 创建新的客户端代理
+func NewAgent(addr string, idx uint32, flag byte, config *Config) (*Agent, error) {
 	conn, proxyAddr, err := streams.NewUdpSocketClient(addr)
 	if err != nil {
 		return nil, err
 	}
-	return NewAgentService(conn, proxyAddr, idx, flag)
+	return NewAgentService(conn, proxyAddr, idx, flag, config)
 }
 
-func (agt *Agent) AddAuthAgent(idx uint32, flag byte) error {
+func (agt *Agent) addAuthAgent(idx uint32, flag byte) error {
 	agentConn := &Socket{
 		Conn:      agt.NetConn,
 		Idx:       idx,
@@ -116,7 +115,7 @@ func (agt *Agent) AddAuthAgent(idx uint32, flag byte) error {
 	binary.LittleEndian.PutUint32(head[:], idx)
 	head[3] = (flag & PROXY_FLAG_DEST_SVR) | PROXY_FLAG_AUTH_SYN
 	copy(head[4:8], []byte(PROXY_MAGIC))
-	err := authAgent(agt.NetConn, agt.RemoteAddress, head[:])
+	err := agt.authAgent(head[:])
 	if err != nil {
 		return err
 	}
@@ -131,7 +130,9 @@ type Auth struct {
 	Sign string `json:"s"` // 客户端的签名，用于服务端校验客户端的合法性
 }
 
-func authAgent(conn net.PacketConn, proxyAddr net.Addr, head []byte) error {
+func (agt *Agent) authAgent(head []byte) error {
+	conn := agt.NetConn
+	proxyAddr := agt.RemoteAddress
 	buffer := make([]byte, 4096)
 	var strAddr string
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -163,9 +164,9 @@ func authAgent(conn net.PacketConn, proxyAddr net.Addr, head []byte) error {
 
 	info := Auth{
 		Ts:  time.Now().Unix(),
-		Ver: PROXY_SIGN_VER,
+		Ver: agt.Config.Version,
 	}
-	info.Sign = utils.EncryptBytes([]byte(fmt.Sprintf("%s_%s_%d", strAddr, PROXY_SIGN_SALT, info.Ts)))
+	info.Sign = utils.EncryptBytes([]byte(fmt.Sprintf("%s_%s_%d", strAddr, agt.Config.SignSalt, info.Ts)))
 	jsonInfo, err := utils.ToJsonByte(info)
 	if err != nil {
 		return err
