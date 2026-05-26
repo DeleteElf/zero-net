@@ -55,6 +55,18 @@ enum NetworkResult {
 #ifndef GO_CGO_PROLOGUE_H
 #define GO_CGO_PROLOGUE_H
 
+static void callMessageCallback(MessageCallback callback,const char* msg){
+	if(callback){
+		callback(msg);
+	}
+}
+
+static void callMessageChannelCallback(MessageChannelCallback callback,const char* msg,int channelId){
+	if(callback){
+		callback(msg,channelId);
+	}
+}
+
 typedef signed char GoInt8;
 typedef unsigned char GoUint8;
 typedef short GoInt16;
@@ -120,6 +132,12 @@ int ServerSocketClose(char* clientId);
 int ServerSocketSend(char* clientId, int chnIdx, NetworkData* data);
 int ServerSocketReceive(ClientData* data);
 int ServerSocketChannelReceive(char* clientId, int chnIdx, NetworkData* data);
+int ProxyServerCreate(NetworkData* config);
+int ProxyServerClose(void);
+int ProxyServerStartListen(void);
+int ProxyServerSocketClose(char* clientId);
+int ProxyServerSocketSend(char* clientId, int chnIdx, NetworkData* data);
+int ProxyServerSocketReceive(ClientData* data);
 
 #ifdef __cplusplus
 }

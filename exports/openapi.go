@@ -5,19 +5,6 @@ package exports
 
 #include <string.h>
 #include "network-quic.h"
-
-static void callMessageCallback(MessageCallback callback,const char* msg){
-	if(callback){
-		callback(msg);
-	}
-}
-
-static void callMessageChannelCallback(MessageChannelCallback callback,const char* msg,int channelId){
-	if(callback){
-		callback(msg,channelId);
-	}
-}
-
 */
 import "C"
 import (
@@ -30,12 +17,6 @@ import (
 	"time"
 	"unsafe"
 )
-
-type AcceptInfo struct {
-	ChannelCount  int    `json:"count,default=1"`
-	ClientId      string `json:"id" validate:"required"`
-	ServerAddress string `json:"server" validate:"required"`
-}
 
 func FromBytes(data *C.NetworkData) []byte {
 	if data.ptr != nil && data.len > 0 {

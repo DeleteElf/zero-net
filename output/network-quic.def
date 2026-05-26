@@ -18,3 +18,10 @@ EXPORTS
     ServerSocketClose
     ServerSocketSend
     ServerSocketReceive
+
+    ProxyServerCreate
+    ProxyServerClose
+    ProxyServerStartListen
+    ProxyServerSocketClose
+    ProxyServerSocketSend
+    ProxyServerSocketReceive

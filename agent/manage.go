@@ -212,7 +212,6 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect Agent
 					continue
 				}
 				agent.Proxy = &proxyInfo
-				mgr.Agents[proxyInfo.Idx] = agent //连接成功即可
 				agent.Server = server.NewServer(agent.Socket, true)
 				agent.Server.OnAcceptSocket = func(id string) {
 					onAcceptSocket(agent.Proxy.Idx, id)
@@ -220,6 +219,7 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect Agent
 				go agent.Server.StartListen(func(id string) {
 					onDisconnect(agent.Proxy.Idx, id)
 				})
+				mgr.Agents[proxyInfo.Idx] = agent //连接成功即可
 				slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
 				//} else {
 				//	_ = mgr.Agents[proxyInfo.Idx].addAuthAgent(uint32(proxyInfo.Idx), 1)
