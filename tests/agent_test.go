@@ -6,6 +6,7 @@ import (
 	"github.com/DeleteElf/network-quic/framework/utils"
 	"github.com/DeleteElf/network-quic/server"
 	"log/slog"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -29,27 +30,86 @@ func TestHostAgent(t *testing.T) {
 		Data: utils.JsonObject(map[string]interface{}{
 			"device_id": "0A76DE8C-1AB1-35C3-A137-FC9E10B1EF9F",
 		}),
+		//Port: 48000,
 	}
 	mgr := agent.NewManagePlatform(cfg)
-	for {
-		if mgr.Server == nil { //等待创建
-			time.Sleep(10 * time.Millisecond)
-			continue
+	func() {
+		for {
+			if mgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
+				break
+			}
+			if err := mgr.ListenAgentConnect(func(idx int, id string) {
+				slog.Debug("新的客户端接入：", slog.String("id", id))
+				go agentSocketHandler(mgr.Agents[idx].Server, id)
+			}, func(idx int, id string) {
+				slog.Debug("客户端断开连接：", slog.String("id", id))
+			}); err != nil {
+				slog.Debug("未与管理平台连接成功，5秒后重试！", slog.Any("err", err))
+				time.Sleep(5 * time.Second)
+			}
+			if !mgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
+				slog.Debug("与管理平台断开连接，5秒后重试！")
+				time.Sleep(5 * time.Second)
+			}
 		}
-		mgr.Server.OnAcceptSocket = func(id string) {
-			slog.Debug("新的客户端接入：", slog.String("id", id))
-			go agentSocketHandler(mgr.Server, id)
-		}
-		mgr.Server.StartListen(func(id string) {
-			slog.Debug("客户端断开连接：", slog.String("id", id))
-		})
-		slog.Debug("服务端退出监听！")
-		mgr.Server.Close()
-		mgr.Server = nil
-		if !restart {
-			break
-		}
+		slog.Debug("与管理平台结束连接！")
+	}()
+	mgr.Close()
+	//for {
+	//	if mgr.Server == nil { //等待创建
+	//		time.Sleep(10 * time.Millisecond)
+	//		continue
+	//	}
+	//	mgr.Server.OnAcceptSocket = func(id string) {
+	//		slog.Debug("新的客户端接入：", slog.String("id", id))
+	//		go agentSocketHandler(mgr.Server, id)
+	//	}
+	//	mgr.Server.StartListen(func(id string) {
+	//		slog.Debug("客户端断开连接：", slog.String("id", id))
+	//	})
+	//	slog.Debug("服务端退出监听！")
+	//	mgr.Server.Close()
+	//	mgr.Server = nil
+	//	if !restart {
+	//		break
+	//	}
+	//}
+}
+
+func ConnectClientAgent(request *agent.Requst) *client.Client {
+	proxy, err := agent.GetProxy(request)
+	if err != nil {
+		return nil
 	}
+	proxy.ProxyAddr = proxy.ProxyIp + ":" + proxy.ProxyPort
+	cli := client.NewClient(proxy.ProxyAddr, request.CliId) //尝试连接本机服务
+	agt, err := agent.NewAgent(cli.ServerAddress, uint32(proxy.Idx), 0)
+	if err == nil && agt != nil {
+		sock := agt.Socket
+		cli.ConnectToAgent(3, sock, agt.RemoteAddress, func(id string) {
+			slog.Debug("socket已经断开===》！")
+		}) //创建udp网络
+	}
+	if cli.Socket == nil {
+		slog.Info("客户端连接失败！", slog.Int("idx", proxy.Idx))
+		return nil
+	}
+
+	for i := 0; i < cli.Socket.ChannelCount; i++ {
+		go receiveHandler(cli, i)
+	}
+	msg0 := "hello,i am channel 0 data from client"
+	slog.Info("正在向通道0发送数据", slog.String("msg", msg0))
+	_, _ = cli.Socket.Send(0, []byte(msg0))
+	msg1 := "hello,i am channel 1 data from client"
+	slog.Info("正在向通道1发送数据", slog.String("msg", msg1))
+	_, _ = cli.Socket.Send(1, []byte(msg1))
+
+	msg2 := "hello,i am channel 2 data from client"
+	slog.Info("正在向通道2发送数据", slog.String("msg", msg2))
+	_, _ = cli.Socket.Send(2, []byte(msg2))
+
+	return cli
 }
 
 func TestClientAgent(t *testing.T) {
@@ -78,36 +138,34 @@ func TestClientAgent(t *testing.T) {
 		CliId:   "1a1f2dadcd90473bb684bcd02b9cc629",
 		NetType: "udp",
 	}
-	proxy, err := agent.GetProxy(request)
-	if err != nil {
-		return
+	cli := ConnectClientAgent(request)
+
+	for {
+		if cli.IsClosed {
+			break
+		}
+		_, _ = cli.Socket.Ping(0)
+		time.Sleep(5 * time.Millisecond)
 	}
-	proxy.ProxyAddr = proxy.ProxyIp + ":" + proxy.ProxyPort
-	cli := client.NewClient(proxy.ProxyAddr, request.CliId) //尝试连接本机服务
-	agt, err := agent.NewAgent(cli.ServerAddress, uint32(proxy.Idx), 0)
-	if err == nil && agt != nil {
-		cli.ConnectToAgent(3, agt.NetConn, agt.RemoteAddress, func(id string) {
-			slog.Debug("socket已经断开===》！")
-		}) //创建udp网络
-	}
-	if cli.Socket == nil {
-		slog.Info("客户端连接失败！")
-		return
+	//time.Sleep(time.Second * 10)
+}
+
+func TestMultiClientAgent(t *testing.T) {
+	utils.InitLog(slog.LevelDebug, nil)
+	request := &agent.Requst{
+		MgrAddr: "https://192.168.199.159:3005",
+		Token:   "0DBDB1AE-CABD-F2BA-4F89-132A39EC90D1",
+		DevId:   "0A76DE8C-1AB1-35C3-A137-FC9E10B1EF9F",
+		ProxyId: "A7C569D2-F0A7-7B0C-BB2A-E44D59D5A5EB",
+		SvrAddr: "192.168.199.22",
+		Proxy:   true,
+		CliId:   "1a1f2dadcd90473bb684bcd02b9cc629",
+		NetType: "udp",
 	}
 
-	for i := 0; i < cli.Socket.ChannelCount; i++ {
-		go receiveHandler(cli, i)
+	for i := 0; i < 3; i++ {
+		request.CliId += strconv.Itoa(i)
+		ConnectClientAgent(request)
 	}
-	msg0 := "hello,i am channel 0 data from client"
-	slog.Info("正在向通道0发送数据", slog.String("msg", msg0))
-	_, _ = cli.Socket.Send(0, []byte(msg0))
-	msg1 := "hello,i am channel 1 data from client"
-	slog.Info("正在向通道1发送数据", slog.String("msg", msg1))
-	_, _ = cli.Socket.Send(1, []byte(msg1))
-
-	msg2 := "hello,i am channel 2 data from client"
-	slog.Info("正在向通道2发送数据", slog.String("msg", msg2))
-	_, _ = cli.Socket.Send(2, []byte(msg2))
-
 	time.Sleep(time.Second * 10)
 }

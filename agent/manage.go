@@ -10,16 +10,18 @@ import (
 	"github.com/deleteelf/goframework/utils/jsonhelper"
 	"github.com/quic-go/quic-go"
 	"log/slog"
-	"net"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
+type AgentMessageCallbackFunc func(int, string)
+
 type Config struct {
 	MgrAddr string           `json:"mgr_addr"`
 	Hearts  int              `json:"hearts"`
 	Data    utils.JsonObject `json:"data"`
+	//Port    int              `json:"port"` //因为代理中心的问题，暂时无法直接设置端口
 }
 
 type AgentStream struct {
@@ -36,10 +38,11 @@ type ManagePlatform struct {
 	//与管理平台之间的连接
 	wsConn *websocket.Conn
 	framework.CloseableObject
-	//平台对接的代理
-	Agents []*Agent
-	//平台对接的服务,一个平台只能一个服务,一个服务可以对接多个代理
-	Server *server.Server
+	Agents map[int]*Agent
+	config *Config
+
+	//Server          *server.Server //目前代理中心，只能在未建立quic通讯前打通路由，因此不能在此建立服务对象
+	lastMessageTime time.Time
 }
 
 func NewManagePlatform(cfg *Config) *ManagePlatform {
@@ -47,27 +50,46 @@ func NewManagePlatform(cfg *Config) *ManagePlatform {
 	websocket.DefaultDialer.TLSClientConfig = &tls.Config{
 		InsecureSkipVerify: true,
 	}
+	ws, _, err := websocket.DefaultDialer.Dial(cfg.MgrAddr, nil)
+	if err != nil {
+		return nil
+	}
+	data := PlatformActionInfo{
+		Action: ACTION_REG,
+		From:   "host",
+		Info:   cfg.Data,
+	}
 	mgr := &ManagePlatform{
 		AgentStreamChannel: make(chan AgentStream), //创建
-		Agents:             make([]*Agent, 0),      //创建代理空间
+		Agents:             make(map[int]*Agent),   //创建代理空间
+		wsConn:             ws,
+		config:             cfg,
+		lastMessageTime:    time.Now(),
 	}
 	mgr.IsClosed = false
-	go func() {
-		for {
-			if mgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
-				break
-			}
-			if err := mgr.connectToAgent(cfg); err != nil {
-				slog.Debug("未与管理平台连接成功，5秒后重试！", slog.Any("err", err))
-				time.Sleep(5 * time.Second)
-			}
-			if !mgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
-				slog.Debug("与管理平台断开连接，5秒后重试！")
-				time.Sleep(5 * time.Second)
-			}
-		}
-		slog.Debug("与管理平台结束连接！")
-	}()
+	if err = mgr.sendJson(data); err != nil {
+		return nil
+	}
+	go mgr.Hearts() //心跳
+	//todo: 测试直接建立服务端，与代理中心无法通讯
+	//mgr.Server = server.NewServerByAddress("0.0.0.0:" + strconv.Itoa(cfg.Port)) //直接建立服务端
+	//todo: 测试直接建立udp客户端，固定ip时，无法与代理中心建立通讯
+	//listenAddr, err := net.ResolveUDPAddr(streams.STREAM_NETWORK_UDP, "0.0.0.0:"+strconv.Itoa(cfg.Port))
+	//if err != nil {
+	//	return nil
+	//}
+	//conn, err := net.ListenUDP(streams.STREAM_NETWORK_UDP, listenAddr)
+	//if err != nil {
+	//	return nil
+	//}
+	//mgr.Server = server.NewServer(conn, true)
+	//
+	//mgr.Server.OnAcceptSocket = func(id string) {
+	//	slog.Debug("test accept socket", slog.String("id", id))
+	//}
+	//go mgr.Server.StartListen(func(id string) {
+	//	slog.Debug("test disconnect socket", slog.String("id", id))
+	//})
 	return mgr
 }
 
@@ -98,46 +120,31 @@ func (mgr *ManagePlatform) send(msg string) error {
 	return nil
 }
 
-func (mgr *ManagePlatform) connectToAgent(cfg *Config) error {
-	ws, _, err := websocket.DefaultDialer.Dial(cfg.MgrAddr, nil)
-	if err != nil {
-		return err
-	}
-	mgr.wsConn = ws
-	defer mgr.Close()
-	data := PlatformActionInfo{
-		Action: ACTION_REG,
-		From:   "host",
-		Info:   cfg.Data,
-	}
-	if err = mgr.sendJson(data); err != nil {
-		return err
-	}
-	tsMsg := time.Now()
-	go func() {
-		tickerDuration := time.Duration(cfg.Hearts) * time.Second
-		expireDuration := time.Duration(cfg.Hearts+10) * time.Second
-		ticker := time.NewTicker(tickerDuration)
-		defer ticker.Stop()
-		for range ticker.C {
-			if mgr.wsConn == nil {
-				break
-			}
-			if mgr.IsClosed {
-				break
-			}
-			if tsMsg.Add(expireDuration).Compare(time.Now()) < 0 {
-				slog.Warn("platform pong time out")
-				_ = ws.Close()
-				break
-			}
-			_ = mgr.sendJson(PlatformActionInfo{
-				Action: "ping",
-				From:   "host",
-			})
+func (mgr *ManagePlatform) Hearts() {
+	tickerDuration := time.Duration(mgr.config.Hearts) * time.Second
+	expireDuration := time.Duration(mgr.config.Hearts+10) * time.Second
+	ticker := time.NewTicker(tickerDuration)
+	defer ticker.Stop()
+	for range ticker.C {
+		if mgr.wsConn == nil {
+			break
 		}
-	}()
+		if mgr.IsClosed {
+			break
+		}
+		if mgr.lastMessageTime.Add(expireDuration).Compare(time.Now()) < 0 {
+			slog.Warn("platform pong time out")
+			_ = mgr.wsConn.Close()
+			break
+		}
+		_ = mgr.sendJson(PlatformActionInfo{
+			Action: "ping",
+			From:   "host",
+		})
+	}
+}
 
+func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect AgentMessageCallbackFunc) error {
 	for {
 		if mgr.wsConn == nil {
 			break
@@ -145,19 +152,18 @@ func (mgr *ManagePlatform) connectToAgent(cfg *Config) error {
 		if mgr.IsClosed {
 			break
 		}
-		_, msg, err := ws.ReadMessage()
+		_, msg, err := mgr.wsConn.ReadMessage()
 		if err != nil {
 			slog.Error("mgr return message error:", slog.Any("err", err))
 			break
 		}
 		slog.Debug("mgr return message:", slog.Any("msg", msg))
-		tsMsg = time.Now() //任何消息都更新时间
-
 		var proxy ActionProxy
 		if err := json.Unmarshal(msg, &proxy); err != nil {
 			slog.Warn("json Unmarshal err", slog.Any("err", err))
 			continue
 		}
+		mgr.lastMessageTime = time.Now()
 		if !proxy.IsSuccess() {
 			slog.Warn("action not success")
 			continue
@@ -166,7 +172,6 @@ func (mgr *ManagePlatform) connectToAgent(cfg *Config) error {
 			//slog.Debug("mgr resp", slog.String("action", proxy.Action))
 			continue
 		}
-
 		proxyInfo := proxy.Data
 		if len(proxyInfo.ProxyAddr) == 0 {
 			proxyInfo.ProxyAddr = proxyInfo.ProxyIp + ":" + proxyInfo.ProxyPort
@@ -179,38 +184,47 @@ func (mgr *ManagePlatform) connectToAgent(cfg *Config) error {
 			if len(proxyInfo.ProxyAddr) == 0 { //平台没有返回有效地址
 				continue
 			}
-
 			if i == 1 {
 				proxyInfo.ProxyAddr = proxyInfo.ProxyExternalIp + ":" + proxyInfo.ProxyExternalPort
 			}
-			slog.Debug("从管理平台获取的代理地址：", slog.String("address", proxyInfo.ProxyAddr))
-			if _, err := net.ResolveUDPAddr("udp", proxyInfo.ProxyAddr); err != nil {
-				slog.Info("mgr resp proxy invalid", slog.String("addr", proxyInfo.ProxyAddr), slog.Any("err", err))
-				continue
-			}
-			//if mgr.server == nil { //如果是与管理平台临时断开连接，我们这里不进行重连
-			slog.Debug("正在连接代理的预设地址...", slog.String("addr", proxyInfo.ProxyAddr), slog.Int("idx", proxyInfo.Idx))
-			agent, err := NewAgent(proxyInfo.ProxyAddr, uint32(proxyInfo.Idx), 1)
-			if err != nil {
-				slog.Error("连接代理失败", slog.Any("err", err))
-				if agent.NetConn != nil {
-					_ = agent.NetConn.Close()
+			//slog.Debug("从管理平台获取的代理地址：", slog.String("address", proxyInfo.ProxyAddr))
+			//proxyAddr, err := net.ResolveUDPAddr("udp", proxyInfo.ProxyAddr)
+			//if err != nil { //检查代理地址是否有效
+			//	slog.Info("mgr resp proxy invalid", slog.String("addr", proxyInfo.ProxyAddr), slog.Any("err", err))
+			//	continue
+			//}
+			if mgr.Agents[proxyInfo.Idx] == nil { //如果这个代理还没有连接，则进行连接
+				slog.Debug("正在连接代理授权地址...", slog.String("addr", proxyInfo.ProxyAddr), slog.Int("idx", proxyInfo.Idx))
+				conn, proxyAddr, err := streams.NewUdpSocketClient(proxyInfo.ProxyAddr)
+				if err != nil {
+					slog.Error("连接代理服务器失败", slog.Any("err", err))
+					continue
 				}
-				continue
+				//agent, err := NewAgentService(mgr.Server.NetConn, proxyAddr, uint32(proxyInfo.Idx), 1)
+				agent, err := NewAgentService(conn, proxyAddr, uint32(proxyInfo.Idx), 1)
+				if err != nil {
+					slog.Error("连接代理失败", slog.Any("err", err))
+					//if agent.NetConn != nil {
+					//	_ = agent.NetConn.Close()
+					//}
+					continue
+				}
+				agent.Proxy = &proxyInfo
+				mgr.Agents[proxyInfo.Idx] = agent //连接成功即可
+				agent.Server = server.NewServer(agent.Socket, true)
+				agent.Server.OnAcceptSocket = func(id string) {
+					onAcceptSocket(agent.Proxy.Idx, id)
+				}
+				go agent.Server.StartListen(func(id string) {
+					onDisconnect(agent.Proxy.Idx, id)
+				})
+				slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
+				//} else {
+				//	_ = mgr.Agents[proxyInfo.Idx].AddAuthAgent(uint32(proxyInfo.Idx), 1)
+				//	slog.Debug("代理服务已存在，继续使用！", slog.Int("idx", proxyInfo.Idx))
 			}
-			agent.Proxy = &proxyInfo
-			mgr.Agents = append(mgr.Agents, agent) //连接成功即可
-			if mgr.Server == nil {
-				mgr.Server = server.NewServer(agent.NetConn, true)
-			}
-			slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
 			break
 		}
-		//if mgr.Agent != nil {
-		//	slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
-		//} else {
-		//	slog.Debug("代理服务创建失败！", slog.Int("idx", proxyInfo.Idx))
-		//}
 	}
 	return nil
 }

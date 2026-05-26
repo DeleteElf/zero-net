@@ -25,6 +25,8 @@ func receiveHandler(cli *client.Client, channelIndex int) {
 		cli.Socket.StreamChannels[channelIndex].Buffer = nil
 		if channelIndex == 0 {
 			_, _ = cli.Socket.Send(channelIndex, []byte("bye"))
+			slog.Info("send bye", slog.Int("channel", channelIndex))
+			cli.Close()
 			//} else if channelIndex == 1 {
 			//	//time.Sleep(500 * time.Millisecond)
 			//	_, _ = cli.Send(cli.Streams[channelIndex], []byte("restart"))
@@ -63,10 +65,11 @@ func TestClient(t *testing.T) {
 
 	//time.Sleep(time.Second * 3) //等待3秒，等他们通讯完成再退出
 	for {
-		if !cli.IsClosed && !cli.Socket.IsClosed {
-			time.Sleep(time.Millisecond * 10)
-		} else {
+		if cli.IsClosed || cli.Socket.IsClosed {
 			break
+		} else {
+			_, _ = cli.Socket.Ping(0)
+			time.Sleep(time.Millisecond * 10)
 		}
 	}
 }

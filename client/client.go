@@ -128,20 +128,14 @@ func (cli *Client) ConnectToAgent(channelCount int, conn net.PacketConn, addr ne
 		Allow0RTT:               true,
 		// EnableDatagrams:    true,
 	}
-	slog.Debug("正在建立远程连接", slog.Any("ServerAddress", cli.netAddr))
+	slog.Debug("正在通过代理建立远程连接", slog.Any("ServerAddress", cli.netAddr))
 	quicConn, err := quic.Dial(context.TODO(), cli.netConn, cli.netAddr, tlsConfig, quicConfig)
-
 	if err != nil {
 		slog.Info("远程连接失败！", slog.Any("err", err))
-		cli.Close()
 		return
 	}
-	//quicConn = cli.waitConn()
-	//if quicConn == nil {
-	//	cli.Close()
-	//	return
-	//}
 	cli.quicConn = quicConn
+
 	cli.Socket = streams.NewSocket(cli.Id, channelCount, onDisconnect)
 	slog.Info("客户端连接成功！", slog.Int("通道数", cli.Socket.ChannelCount))
 	info := streams.StreamInfo{
@@ -151,7 +145,7 @@ func (cli *Client) ConnectToAgent(channelCount int, conn net.PacketConn, addr ne
 	}
 	for i := 0; i < channelCount; i++ {
 		info.Index = i
-		stream, err := streams.CreateStream(quicConn, info) //创建并打开流
+		stream, err := streams.CreateStream(cli.quicConn, info) //创建并打开流
 		if err != nil {
 			cli.Close()
 			return

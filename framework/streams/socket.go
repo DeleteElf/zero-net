@@ -152,3 +152,21 @@ func (s *Socket) Send(channelId int, data []byte) (bool, error) {
 	}
 	return s.StreamChannels[channelId].Send(data)
 }
+
+func (s *Socket) Ping(channelId int) (bool, error) {
+	if s.IsClosed {
+		return false, nil
+	}
+	if channelId >= s.ChannelCount {
+		return false, errors.New("超过通道允许范围！")
+	}
+	if s.StreamChannels[channelId] == nil {
+		return false, errors.New("通道未初始化！")
+	}
+	ping := map[string]interface{}{
+		"action": "ping",
+		"from":   "host",
+	}
+	data, _ := utils.ToJsonByte(ping)
+	return s.StreamChannels[channelId].Send(data)
+}
