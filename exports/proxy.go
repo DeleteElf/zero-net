@@ -52,7 +52,7 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 			}
 			managerCtx.ConnectToPlatform()
 			go managerCtx.Hearts() //维持心跳
-			if err := managerCtx.ListenAgentConnect(func(sock *streams.Socket) {
+			err1 := managerCtx.ListenAgentConnect(func(sock *streams.Socket) {
 				socketMap[sock.Id] = sock
 				slog.Debug("新的客户端接入：", slog.String("id", sock.Id))
 				if onAcceptSocket != nil {
@@ -63,9 +63,11 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 					C.callMessageCallback(onDisConnected, C.CString(sock.Id))
 				}
 				delete(socketMap, sock.Id)
-			}); err != nil {
-				slog.Debug("未与管理平台连接成功，5秒后重试！", slog.Any("err", err))
+			})
+			if err1 != nil {
+				slog.Debug("监听管理平台的websocket发生错误，5秒后重试！", slog.Any("err", err))
 				time.Sleep(5 * time.Second)
+				continue
 			}
 			if !managerCtx.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
 				slog.Debug("与管理平台断开连接，5秒后重试！")
