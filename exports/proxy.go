@@ -25,7 +25,7 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 	if err != nil {
 		return C.ErrorParam
 	}
-	data := jsonObject["data"].(utils.JsonObject)
+	data := jsonObject["data"].(map[string]interface{})
 	if data == nil {
 		return C.ErrorParam
 	}

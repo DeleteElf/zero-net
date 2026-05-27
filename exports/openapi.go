@@ -30,7 +30,8 @@ var serverCtx *server.Server
 var clientCtx *client.Client
 var managerCtx *agent.ManagePlatform
 var socketMap map[string]*streams.Socket
-var channelCaseList []reflect.SelectCase
+
+//var channelCaseList []reflect.SelectCase //这个如果没有每次重新构建，似乎有问题
 
 var g_log_level int = -1
 
@@ -70,8 +71,7 @@ func InitNetwork() C.int {
 		utils.InitLog(slog.LevelDebug, nil)
 	}
 	utils.InitProcess()
-	socketMap = make(map[string]*streams.Socket)    //初始化全局链路缓存
-	channelCaseList = make([]reflect.SelectCase, 3) //初始化3个
+	socketMap = make(map[string]*streams.Socket) //初始化全局链路缓存
 	return C.Success
 }
 
@@ -357,44 +357,23 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		return C.ErrorContext
 	}
 	for {
-		if serverCtx.IsClosed { //如果等待的过程，结束了，则退出
+		if serverCtx != nil && serverCtx.IsClosed { //如果等待的过程，结束了，则退出
 			return C.ErrorContext
 		}
-		if (serverCtx == nil || len(serverCtx.Sockets) == 0) && (managerCtx == nil || len(managerCtx.Agents) == 0) { //如果还没有接入，则执行等待
+		if len(socketMap) == 0 { //如果还没有接入，则执行等待
 			time.Sleep(time.Millisecond)
 			continue
 		}
 		break //正式工作
 	}
 	if currentBuffer == nil {
-		count := 0
-		if serverCtx != nil {
-			count += len(serverCtx.Sockets) * 3
-		}
-		if managerCtx != nil {
-			count += len(managerCtx.Agents) * 3
-		}
-		if count != len(channelCaseList) {
-			channelCaseList = make([]reflect.SelectCase, count)
-			index := 0
-			//slog.Debug("尝试获取缓存", slog.Int("socket数量", len(serverCtx.Sockets)))
-			if serverCtx != nil {
-				for _, sock := range serverCtx.Sockets { //将所有通道加入到列表
-					for i := 0; i < sock.ChannelCount; i++ {
-						channelCaseList[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
-						index++
-					}
-				}
-			}
-			if managerCtx != nil {
-				for _, agt := range managerCtx.Agents { //将所有通道加入到列表
-					for _, sock := range agt.Server.Sockets {
-						for i := 0; i < sock.ChannelCount; i++ {
-							channelCaseList[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
-							index++
-						}
-					}
-				}
+		count := len(socketMap) * 3
+		channelCaseList := make([]reflect.SelectCase, count)
+		index := 0
+		for _, sock := range socketMap {
+			for i := 0; i < sock.ChannelCount; i++ {
+				channelCaseList[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
+				index++
 			}
 		}
 		_, value, ok := reflect.Select(channelCaseList) //执行监听所有通道
@@ -402,7 +381,6 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 			return C.ErrorClose
 		}
 		buffer := value.Interface().(streams.StreamChannelData)
-		//slog.Debug("获取到缓存", slog.String("clientId", buffer.ClientId), slog.Int("channelId", buffer.ChannelId))
 		currentBuffer = &buffer
 	}
 	if len(currentBuffer.Data) == 0 {
