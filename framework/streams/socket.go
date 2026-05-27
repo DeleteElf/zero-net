@@ -12,7 +12,11 @@ import (
 	"syscall"
 )
 
+// MessageCallbackFunc 消息事件回调
 type MessageCallbackFunc func(string)
+
+// SocketCallbackFunc socket事件回调
+type SocketCallbackFunc func(*Socket)
 
 func NewUdpSocketClient(serverAddr string) (*net.UDPConn, net.Addr, error) {
 	svrAddr, err := net.ResolveUDPAddr(STREAM_NETWORK_UDP, serverAddr)
@@ -50,7 +54,7 @@ type Socket struct {
 	StreamChannels []*StreamChannel
 	ChannelCount   int
 
-	OnDisconnect MessageCallbackFunc
+	OnDisconnect SocketCallbackFunc
 
 	framework.CloseableObject
 	StreamChannelOperating
@@ -58,7 +62,7 @@ type Socket struct {
 	channelEditLock sync.Mutex
 }
 
-func NewSocket(id string, channelCount int, onDisconnect MessageCallbackFunc) *Socket {
+func NewSocket(id string, channelCount int, onDisconnect SocketCallbackFunc) *Socket {
 	sock := &Socket{
 		Id:           id,
 		ChannelCount: channelCount,
@@ -87,7 +91,7 @@ func (s *Socket) OnClosing() bool {
 func (s *Socket) OnClosed() {
 	slog.Debug("socket 已经退出！", slog.String("id", s.Id))
 	if s.OnDisconnect != nil {
-		s.OnDisconnect(s.Id)
+		s.OnDisconnect(s)
 	}
 }
 

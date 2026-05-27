@@ -8,6 +8,7 @@ package exports
 */
 import "C"
 import (
+	"github.com/DeleteElf/network-quic/agent"
 	"github.com/DeleteElf/network-quic/client"
 	"github.com/DeleteElf/network-quic/framework/streams"
 	"github.com/DeleteElf/network-quic/framework/utils"
@@ -27,6 +28,9 @@ func FromBytes(data *C.NetworkData) []byte {
 
 var serverCtx *server.Server
 var clientCtx *client.Client
+var managerCtx *agent.ManagePlatform
+var socketMap map[string]*streams.Socket
+var channelCaseList []reflect.SelectCase
 
 var g_log_level int = -1
 
@@ -66,6 +70,8 @@ func InitNetwork() C.int {
 		utils.InitLog(slog.LevelDebug, nil)
 	}
 	utils.InitProcess()
+	socketMap = make(map[string]*streams.Socket)    //初始化全局链路缓存
+	channelCaseList = make([]reflect.SelectCase, 3) //初始化3个
 	return C.Success
 }
 
@@ -125,15 +131,48 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	if networkType != streams.STREAM_NETWORK_UDP {
 		return C.ErrorParam
 	}
-	clientCtx = client.NewClient(address, id) //尝试连接本机服务
-	err = clientCtx.Connect(int(channelCount), streams.STREAM_NETWORK_UDP, func(id string) {
-		if onDisConnected != nil {
-			C.callMessageCallback(onDisConnected, C.CString(id))
+	if jsonObject["proxy_id"] != nil { //如果配置了代理，则使用代理
+		request := &agent.Requst{
+			Proxy:   true,
+			NetType: networkType,
+			CliId:   id,
 		}
-	}) //创建udp网络
-	if err != nil {
-		slog.Error("客户端连接失败", slog.Any("err", err))
-		return C.ErrorClose
+		request.ProxyId = jsonObject["proxy_id"].(string)
+		request.Token = jsonObject["token"].(string)
+		request.DevId = jsonObject["dev_id"].(string)
+		request.MgrAddr = jsonObject["mgr_addr"].(string)
+
+		proxy, err := agent.GetProxy(request)
+		if err != nil {
+			return C.ErrorParam
+		}
+		proxy.ProxyAddr = proxy.ProxyExternalIp + ":" + proxy.ProxyExternalPort //使用外网地址连接
+		clientCtx = client.NewClient(proxy.ProxyAddr, request.CliId)            //尝试连接本机服务
+
+		cfg := &agent.Config{
+			Version:  "1",
+			SignSalt: "2fbbdf99eae1675484a48e8310db1ee42d3bd6fdbc5e3f3755af848b23cc9817",
+		}
+		agt, err := agent.NewAgent(clientCtx.ServerAddress, uint32(proxy.Idx), 0, cfg)
+		if err == nil && agt != nil {
+			sock := agt.Socket
+			clientCtx.ConnectToAgent(3, sock, agt.RemoteAddress, func(sock *streams.Socket) {
+				if onDisConnected != nil {
+					C.callMessageCallback(onDisConnected, C.CString(sock.Id))
+				}
+			}) //创建udp网络
+		}
+	} else {
+		clientCtx = client.NewClient(address, id) //尝试连接本机服务
+		err = clientCtx.Connect(int(channelCount), streams.STREAM_NETWORK_UDP, func(sock *streams.Socket) {
+			if onDisConnected != nil {
+				C.callMessageCallback(onDisConnected, C.CString(sock.Id))
+			}
+		}) //创建udp网络
+		if err != nil {
+			slog.Error("客户端连接失败", slog.Any("err", err))
+			return C.ErrorClose
+		}
 	}
 	slog.Info("客户端连接成功！", slog.Int("通道数", clientCtx.Socket.ChannelCount))
 	return C.Success
@@ -219,15 +258,17 @@ func ServerCreate(config *C.NetworkData) C.int {
 		return C.ErrorParam
 	}
 	serverCtx = server.NewServerByAddress(address) //尝试连接本机服务
-	serverCtx.OnAcceptSocket = func(id string) {
+	serverCtx.OnAcceptSocket = func(sock *streams.Socket) {
+		socketMap[sock.Id] = sock
 		if onAcceptSocket != nil {
-			C.callMessageCallback(onAcceptSocket, C.CString(id))
+			C.callMessageCallback(onAcceptSocket, C.CString(sock.Id))
 		}
 	}
-	serverCtx.OnSocketDisConnected = func(id string) {
+	serverCtx.OnSocketDisConnected = func(sock *streams.Socket) {
 		if onDisConnected != nil {
-			C.callMessageCallback(onDisConnected, C.CString(id))
+			C.callMessageCallback(onDisConnected, C.CString(sock.Id))
 		}
+		delete(socketMap, sock.Id)
 	}
 	return C.Success
 }
@@ -248,9 +289,9 @@ func ServerStartListen() C.int {
 		slog.Warn("请先创建服务端实例！")
 		return C.ErrorContext
 	}
-	go serverCtx.StartListen(func(id string) {
+	go serverCtx.StartListen(func(sock *streams.Socket) {
 		if onDisConnected != nil {
-			C.callMessageCallback(onDisConnected, C.CString(id))
+			C.callMessageCallback(onDisConnected, C.CString(sock.Id))
 		}
 	})
 	return C.Success
@@ -311,7 +352,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 	if data == nil {
 		return C.ErrorParam
 	}
-	if serverCtx == nil {
+	if serverCtx == nil && managerCtx == nil {
 		slog.Warn("请先创建服务端实例！")
 		return C.ErrorContext
 	}
@@ -319,23 +360,44 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		if serverCtx.IsClosed { //如果等待的过程，结束了，则退出
 			return C.ErrorContext
 		}
-		if len(serverCtx.Sockets) == 0 { //如果还没有接入，则执行等待
+		if (serverCtx == nil || len(serverCtx.Sockets) == 0) && (managerCtx == nil || len(managerCtx.Agents) == 0) { //如果还没有接入，则执行等待
 			time.Sleep(time.Millisecond)
 			continue
 		}
 		break //正式工作
 	}
 	if currentBuffer == nil {
-		cases := make([]reflect.SelectCase, len(serverCtx.Sockets)*3)
-		index := 0
-		//slog.Debug("尝试获取缓存", slog.Int("socket数量", len(serverCtx.Sockets)))
-		for _, sock := range serverCtx.Sockets { //将所有通道加入到列表
-			for i := 0; i < sock.ChannelCount; i++ {
-				cases[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
-				index++
+		count := 0
+		if serverCtx != nil {
+			count += len(serverCtx.Sockets) * 3
+		}
+		if managerCtx != nil {
+			count += len(managerCtx.Agents) * 3
+		}
+		if count != len(channelCaseList) {
+			channelCaseList = make([]reflect.SelectCase, count)
+			index := 0
+			//slog.Debug("尝试获取缓存", slog.Int("socket数量", len(serverCtx.Sockets)))
+			if serverCtx != nil {
+				for _, sock := range serverCtx.Sockets { //将所有通道加入到列表
+					for i := 0; i < sock.ChannelCount; i++ {
+						channelCaseList[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
+						index++
+					}
+				}
+			}
+			if managerCtx != nil {
+				for _, agt := range managerCtx.Agents { //将所有通道加入到列表
+					for _, sock := range agt.Server.Sockets {
+						for i := 0; i < sock.ChannelCount; i++ {
+							channelCaseList[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
+							index++
+						}
+					}
+				}
 			}
 		}
-		_, value, ok := reflect.Select(cases) //执行监听所有通道
+		_, value, ok := reflect.Select(channelCaseList) //执行监听所有通道
 		if !ok {
 			return C.ErrorClose
 		}

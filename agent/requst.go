@@ -15,7 +15,6 @@ type Requst struct {
 	Token   string `json:"token"`     // 管理平台的token
 	DevId   string `json:"dev_id"`    // 管理平台的dev_id
 	ProxyId string `json:"proxy_id"`  // 管理平台的proxy_id
-	SvrAddr string `json:"svr_addr"`  // 服务端的地址
 	Proxy   bool   `json:"proxy"`     // 是否代理
 	CliId   string `json:"client_id"` // 客户端ID
 	NetType string // 网络类型

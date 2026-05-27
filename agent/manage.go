@@ -1,5 +1,6 @@
 package agent
 
+import "C"
 import (
 	"crypto/tls"
 	"encoding/json"
@@ -146,7 +147,7 @@ func (mgr *ManagePlatform) Hearts() {
 	}
 }
 
-func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect AgentMessageCallbackFunc) error {
+func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect streams.SocketCallbackFunc) error {
 	for {
 		if mgr.wsConn == nil {
 			break
@@ -213,12 +214,8 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect Agent
 				}
 				agent.Proxy = &proxyInfo
 				agent.Server = server.NewServer(agent.Socket, true)
-				agent.Server.OnAcceptSocket = func(id string) {
-					onAcceptSocket(agent.Proxy.Idx, id)
-				}
-				go agent.Server.StartListen(func(id string) {
-					onDisconnect(agent.Proxy.Idx, id)
-				})
+				agent.Server.OnAcceptSocket = onAcceptSocket
+				go agent.Server.StartListen(onDisconnect)
 				mgr.Agents[proxyInfo.Idx] = agent //连接成功即可
 				slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
 				//} else {
@@ -226,6 +223,30 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect Agent
 				//	slog.Debug("代理服务已存在，继续使用！", slog.Int("idx", proxyInfo.Idx))
 			}
 			break
+		}
+	}
+	return nil
+}
+
+func (mgr *ManagePlatform) GetServerSocket(clientId string) *streams.Socket {
+	if len(clientId) == 0 {
+		return nil
+	}
+	for _, agent := range mgr.Agents {
+		if agent.Server.Sockets[clientId] != nil {
+			return agent.Server.Sockets[clientId]
+		}
+	}
+	return nil
+}
+
+func (mgr *ManagePlatform) GetServer(clientId string) *server.Server {
+	if len(clientId) == 0 {
+		return nil
+	}
+	for _, agent := range mgr.Agents {
+		if agent.Server.Sockets[clientId] != nil {
+			return agent.Server
 		}
 	}
 	return nil

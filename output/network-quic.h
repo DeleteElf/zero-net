@@ -137,7 +137,6 @@ int ProxyServerClose(void);
 int ProxyServerStartListen(void);
 int ProxyServerSocketClose(char* clientId);
 int ProxyServerSocketSend(char* clientId, int chnIdx, NetworkData* data);
-int ProxyServerSocketReceive(ClientData* data);
 
 #ifdef __cplusplus
 }

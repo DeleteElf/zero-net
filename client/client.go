@@ -54,7 +54,7 @@ func (cli *Client) OnClosed() {
 	slog.Debug("客户端已经关闭")
 }
 
-func (cli *Client) Connect(channelCount int, networkType string, onDisconnect streams.MessageCallbackFunc) error {
+func (cli *Client) Connect(channelCount int, networkType string, onDisconnect streams.SocketCallbackFunc) error {
 	if networkType != "udp" {
 		return errors.New("暂时只支持udp连接！")
 	}
@@ -67,7 +67,7 @@ func (cli *Client) Connect(channelCount int, networkType string, onDisconnect st
 	}
 	return cli.ConnectToNet(channelCount, netConn, netAddr, onDisconnect)
 }
-func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.Addr, onDisconnect streams.MessageCallbackFunc) error {
+func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.Addr, onDisconnect streams.SocketCallbackFunc) error {
 	if cli.Socket != nil {
 		return errors.New("当前客户端已经连接！")
 	}
@@ -110,7 +110,7 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 	}
 	return nil
 }
-func (cli *Client) ConnectToAgent(channelCount int, conn net.PacketConn, addr net.Addr, onDisconnect streams.MessageCallbackFunc) {
+func (cli *Client) ConnectToAgent(channelCount int, conn net.PacketConn, addr net.Addr, onDisconnect streams.SocketCallbackFunc) {
 	if cli.Socket != nil {
 		return // errors.New("当前客户端已经连接！")
 	}
@@ -152,23 +152,9 @@ func (cli *Client) ConnectToAgent(channelCount int, conn net.PacketConn, addr ne
 		}
 		go cli.Socket.HandleChannelStreamData(i, stream)
 	}
-	//for {
-	//	stream, err := quicConn.AcceptStream(context.TODO())
-	//	if err != nil {
-	//		errInfo := err.Error()
-	//		if strings.HasPrefix(errInfo, "Application error 0x0 (") {
-	//			slog.Info("quic conn close", slog.Any("info", err))
-	//		} else {
-	//			slog.Error("quic accept stream fail", slog.Any("err", err))
-	//		}
-	//		return
-	//	}
-	//
-	//	go cli.processStream(stream, onDisconnect)
-	//}
 }
 
-func (cli *Client) processStream(stream *quic.Stream, onDisconnect streams.MessageCallbackFunc) {
+func (cli *Client) processStream(stream *quic.Stream, onDisconnect streams.SocketCallbackFunc) {
 	streamId := stream.StreamID()
 	info, err := streams.ReadStreamInfo(stream)
 	if err != nil {

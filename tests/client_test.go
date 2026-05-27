@@ -40,8 +40,8 @@ func TestClient(t *testing.T) {
 	utils.InitLog(slog.LevelDebug, nil)                  //初始化日志
 	cli := client.NewClient("127.0.0.1:10001", "test01") //尝试连接本机服务
 
-	err := cli.Connect(3, streams.STREAM_NETWORK_UDP, func(id string) {
-		slog.Debug("socket已经断开===》！")
+	err := cli.Connect(3, streams.STREAM_NETWORK_UDP, func(sock *streams.Socket) {
+		slog.Debug("socket已经断开===》！", slog.String("clientId", sock.Id))
 	}) //创建udp网络
 
 	if err != nil {

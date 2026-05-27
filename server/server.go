@@ -30,8 +30,8 @@ type Server struct {
 
 	lock sync.Mutex
 
-	OnAcceptSocket       streams.MessageCallbackFunc
-	OnSocketDisConnected streams.MessageCallbackFunc
+	OnAcceptSocket       streams.SocketCallbackFunc
+	OnSocketDisConnected streams.SocketCallbackFunc
 
 	framework.CloseableObject
 }
@@ -112,7 +112,7 @@ func (s *Server) OnClosed() {
 	slog.Debug("服务端已经关闭")
 }
 
-func (s *Server) StartListen(onDisconnect streams.MessageCallbackFunc) {
+func (s *Server) StartListen(onDisconnect streams.SocketCallbackFunc) {
 	tlsConfig := utils.GenTLSConfig()
 	quicConfig := &quic.Config{
 		// MaxIncomingStreams: 0xffffffffffff, // 最大默认stream输入，默认100
@@ -152,7 +152,7 @@ func (s *Server) StartListen(onDisconnect streams.MessageCallbackFunc) {
 	slog.Info("服务停止监听")
 }
 
-func (s *Server) acceptConnection(quicConn *quic.Conn, onDisconnect streams.MessageCallbackFunc) {
+func (s *Server) acceptConnection(quicConn *quic.Conn, onDisconnect streams.SocketCallbackFunc) {
 	defer func() {
 		slog.Info("连接断开", slog.Any("addr", quicConn.RemoteAddr()))
 		_ = quicConn.CloseWithError(0, "other")
@@ -173,7 +173,7 @@ func (s *Server) acceptConnection(quicConn *quic.Conn, onDisconnect streams.Mess
 	}
 }
 
-func (s *Server) processStream(stream *quic.Stream, onDisconnect streams.MessageCallbackFunc) {
+func (s *Server) processStream(stream *quic.Stream, onDisconnect streams.SocketCallbackFunc) {
 	streamId := stream.StreamID()
 	info, err := streams.ReadStreamInfo(stream)
 	if err != nil {
@@ -194,17 +194,18 @@ func (s *Server) processStream(stream *quic.Stream, onDisconnect streams.Message
 	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId), slog.String("clientId", info.Id))
 	s.lock.Lock()
 	if s.Sockets[info.Id] == nil {
-		s.Sockets[info.Id] = streams.NewSocket(info.Id, info.Count, func(id string) {
-			if s.Sockets[info.Id] != nil {
-				s.Sockets[id] = nil
-				delete(s.Sockets, id)
+		socket := streams.NewSocket(info.Id, info.Count, func(sock *streams.Socket) {
+			if s.Sockets[sock.Id] != nil {
+				s.Sockets[sock.Id] = nil
+				delete(s.Sockets, sock.Id)
 			}
 			if onDisconnect != nil {
-				onDisconnect(id)
+				onDisconnect(sock)
 			}
 		})
+		s.Sockets[info.Id] = socket
 		if s.OnAcceptSocket != nil {
-			s.OnAcceptSocket(info.Id)
+			s.OnAcceptSocket(socket)
 		}
 	}
 	s.lock.Unlock()
