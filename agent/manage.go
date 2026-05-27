@@ -19,6 +19,7 @@ import (
 type AgentMessageCallbackFunc func(int, string)
 
 type Config struct {
+	Id       int64
 	MgrAddr  string           `json:"mgr_addr"`
 	Hearts   int              `json:"hearts"`
 	Data     utils.JsonObject `json:"data"`
@@ -55,6 +56,7 @@ func NewManagePlatform(cfg *Config) *ManagePlatform {
 		config:             cfg,
 		lastMessageTime:    time.Now(),
 	}
+	mgr.config.Id = time.Now().UnixNano()
 	mgr.IsClosed = false
 	return mgr
 }
@@ -109,11 +111,15 @@ func (mgr *ManagePlatform) Hearts() {
 	expireDuration := time.Duration(mgr.config.Hearts+10) * time.Second
 	ticker := time.NewTicker(tickerDuration)
 	defer ticker.Stop()
+	id := mgr.config.Id
 	for range ticker.C {
 		if mgr.wsConn == nil {
 			break
 		}
 		if mgr.IsClosed {
+			break
+		}
+		if id != mgr.config.Id { //如果已经不是之前的连接，则跳出
 			break
 		}
 		if mgr.lastMessageTime.Add(expireDuration).Compare(time.Now()) < 0 {
@@ -126,6 +132,7 @@ func (mgr *ManagePlatform) Hearts() {
 			From:   "host",
 		})
 	}
+	slog.Debug("platform stop ping!")
 }
 
 func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect streams.SocketCallbackFunc) error {
