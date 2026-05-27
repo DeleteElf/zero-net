@@ -21,8 +21,7 @@ enum LogLevel {
     LevelWarn,
     LevelInfo,
     LevelDebug,
-    // LevelTrace,
-    LevelMax
+    LevelTrace
 };
 //声明消息回调
 typedef void (*MessageCallback)(const char*);
@@ -137,7 +136,6 @@ int ServerSocketReceive(ClientData* data);
 int ServerSocketChannelReceive(char* clientId, int chnIdx, NetworkData* data);
 
 int ProxyServerCreate(NetworkData* config);
-int ProxyServerStartListen(void);
 int ProxyServerSocketClose(char* clientId);
 
 #ifdef __cplusplus

@@ -38,33 +38,20 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 		Version:  "1",
 		SignSalt: "2fbbdf99eae1675484a48e8310db1ee42d3bd6fdbc5e3f3755af848b23cc9817",
 	}
+	if managerCtx != nil && !managerCtx.IsClosed {
+		return C.Success
+	}
 	managerCtx = agent.NewManagePlatform(cfg)
 	if managerCtx == nil {
 		return C.ErrorContext
 	}
 	go func() {
 		for {
-			if managerCtx == nil || managerCtx.IsClosed {
+			if managerCtx == nil || managerCtx.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
 				break
 			}
 			managerCtx.ConnectToPlatform()
-			managerCtx.Hearts() //维持心跳
-		}
-	}()
-	return C.Success
-}
-
-//export ProxyServerStartListen
-func ProxyServerStartListen() C.int {
-	if managerCtx == nil {
-		slog.Warn("请先创建服务端代理实例！")
-		return C.ErrorContext
-	}
-	go func() {
-		for {
-			if managerCtx.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
-				break
-			}
+			go managerCtx.Hearts() //维持心跳
 			if err := managerCtx.ListenAgentConnect(func(sock *streams.Socket) {
 				socketMap[sock.Id] = sock
 				slog.Debug("新的客户端接入：", slog.String("id", sock.Id))
@@ -111,34 +98,3 @@ func ProxyServerSocketClose(clientId *C.char) C.int {
 	slog.Debug("socket执行关闭逻辑完成")
 	return C.Success
 }
-
-//
-////export ProxyServerSocketSend
-//func ProxyServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int {
-//	if data == nil {
-//		return C.ErrorParam
-//	}
-//	if managerCtx == nil {
-//		slog.Warn("请先创建服务端代理实例！")
-//		return C.ErrorContext
-//	}
-//	cliId := C.GoString(clientId)
-//	if len(cliId) == 0 {
-//		return C.ErrorParam
-//	}
-//	sock := managerCtx.GetServerSocket(cliId)
-//	if sock == nil {
-//		return C.ErrorSocket
-//	}
-//	success, err := sock.Send(int(chnIdx), FromBytes(data))
-//	if err != nil {
-//		slog.Error("写入流发生错误", slog.Any("err", err))
-//		svr := managerCtx.GetServer(cliId)
-//		_ = svr.CloseSocket(cliId)
-//		return C.ErrorClose
-//	}
-//	if success {
-//		return C.Success
-//	}
-//	return C.Closed
-//}
