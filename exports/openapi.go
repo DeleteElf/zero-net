@@ -276,6 +276,11 @@ func ServerCreate(config *C.NetworkData) C.int {
 //export ServerClose
 func ServerClose() C.int {
 	onAcceptSocket = nil
+	socketMap = make(map[string]*streams.Socket) //清空map
+	if managerCtx != nil {
+		managerCtx.Close()
+		managerCtx = nil
+	}
 	if serverCtx != nil {
 		serverCtx.Close()
 		serverCtx = nil
@@ -329,14 +334,14 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 	if len(cliId) == 0 {
 		return C.ErrorParam
 	}
-	sock := serverCtx.GetSocket(cliId)
+	sock := socketMap[cliId] //  serverCtx.GetSocket(cliId)
 	if sock == nil {
 		return C.ErrorSocket
 	}
 	success, err := sock.Send(int(chnIdx), FromBytes(data))
 	if err != nil {
 		slog.Error("写入流发生错误", slog.Any("err", err))
-		_ = serverCtx.CloseSocket(cliId)
+		//_ = serverCtx.CloseSocket(cliId)
 		return C.ErrorClose
 	}
 	if success {
@@ -372,16 +377,22 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		index := 0
 		for _, sock := range socketMap {
 			for i := 0; i < sock.ChannelCount; i++ {
-				channelCaseList[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
+				channelCaseList[index] = reflect.SelectCase{Dir: reflect.SelectRecv,
+					Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
 				index++
 			}
 		}
-		_, value, ok := reflect.Select(channelCaseList) //执行监听所有通道
-		if !ok {
-			return C.ErrorClose
+		if index > 0 {
+			_, value, ok := reflect.Select(channelCaseList) //执行监听所有通道
+			if !ok {
+				return C.ErrorClose
+			}
+			buffer := value.Interface().(streams.StreamChannelData)
+			currentBuffer = &buffer
+		} else {
+			slog.Debug("获取到的通道数量为0！")
+			return C.ErrorBuffer
 		}
-		buffer := value.Interface().(streams.StreamChannelData)
-		currentBuffer = &buffer
 	}
 	if len(currentBuffer.Data) == 0 {
 		slog.Debug("获取到缓存大小异常")

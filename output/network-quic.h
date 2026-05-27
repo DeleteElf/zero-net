@@ -119,12 +119,15 @@ extern "C" {
 
 void InitLogCallback(int level, MessageCallback callback);
 int InitNetwork(void);
+
 int SetOnAcceptSocketCallback(MessageCallback callback);
 int SetOnDisConnectedCallback(MessageCallback callback);
+
 int ClientClose(void);
 int ClientConnect(int channelCount, NetworkData* config);
 int ClientChannelReceive(int chnIdx, NetworkData* data);
 int ClientChannelSend(int chnIdx, NetworkData* data);
+
 int ServerCreate(NetworkData* config);
 int ServerClose(void);
 int ServerStartListen(void);
@@ -132,11 +135,10 @@ int ServerSocketClose(char* clientId);
 int ServerSocketSend(char* clientId, int chnIdx, NetworkData* data);
 int ServerSocketReceive(ClientData* data);
 int ServerSocketChannelReceive(char* clientId, int chnIdx, NetworkData* data);
+
 int ProxyServerCreate(NetworkData* config);
-int ProxyServerClose(void);
 int ProxyServerStartListen(void);
 int ProxyServerSocketClose(char* clientId);
-int ProxyServerSocketSend(char* clientId, int chnIdx, NetworkData* data);
 
 #ifdef __cplusplus
 }

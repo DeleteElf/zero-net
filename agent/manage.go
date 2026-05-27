@@ -49,51 +49,34 @@ type ManagePlatform struct {
 }
 
 func NewManagePlatform(cfg *Config) *ManagePlatform {
-	websocket.DefaultDialer.HandshakeTimeout = 10 * time.Second
-	websocket.DefaultDialer.TLSClientConfig = &tls.Config{
-		InsecureSkipVerify: true,
-	}
-	ws, _, err := websocket.DefaultDialer.Dial(cfg.MgrAddr, nil)
-	if err != nil {
-		return nil
-	}
-	data := PlatformActionInfo{
-		Action: ACTION_REG,
-		From:   "host",
-		Info:   cfg.Data,
-	}
 	mgr := &ManagePlatform{
 		AgentStreamChannel: make(chan AgentStream), //创建
 		Agents:             make(map[int]*Agent),   //创建代理空间
-		wsConn:             ws,
 		config:             cfg,
 		lastMessageTime:    time.Now(),
 	}
 	mgr.IsClosed = false
-	if err = mgr.sendJson(data); err != nil {
-		return nil
-	}
-	go mgr.Hearts() //心跳
-	//todo: 测试直接建立服务端，与代理中心无法通讯
-	//mgr.Server = server.NewServerByAddress("0.0.0.0:" + strconv.Itoa(cfg.Port)) //直接建立服务端
-	//todo: 测试直接建立udp客户端，固定ip时，无法与代理中心建立通讯
-	//listenAddr, err := net.ResolveUDPAddr(streams.STREAM_NETWORK_UDP, "0.0.0.0:"+strconv.Itoa(cfg.Port))
-	//if err != nil {
-	//	return nil
-	//}
-	//conn, err := net.ListenUDP(streams.STREAM_NETWORK_UDP, listenAddr)
-	//if err != nil {
-	//	return nil
-	//}
-	//mgr.Server = server.NewServer(conn, true)
-	//
-	//mgr.Server.OnAcceptSocket = func(id string) {
-	//	slog.Debug("test accept socket", slog.String("id", id))
-	//}
-	//go mgr.Server.StartListen(func(id string) {
-	//	slog.Debug("test disconnect socket", slog.String("id", id))
-	//})
 	return mgr
+}
+
+func (mgr *ManagePlatform) ConnectToPlatform() {
+	websocket.DefaultDialer.HandshakeTimeout = 10 * time.Second
+	websocket.DefaultDialer.TLSClientConfig = &tls.Config{
+		InsecureSkipVerify: true,
+	}
+	ws, _, err := websocket.DefaultDialer.Dial(mgr.config.MgrAddr, nil)
+	if err != nil {
+		return
+	}
+	data := PlatformActionInfo{
+		Action: ACTION_REG,
+		From:   "host",
+		Info:   mgr.config.Data,
+	}
+	if err = mgr.sendJson(data); err != nil {
+		return
+	}
+	mgr.wsConn = ws
 }
 
 func (mgr *ManagePlatform) OnClosing() {

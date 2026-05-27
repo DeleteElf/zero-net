@@ -20,7 +20,5 @@ EXPORTS
     ServerSocketReceive
 
     ProxyServerCreate
-    ProxyServerClose
     ProxyServerStartListen
     ProxyServerSocketClose
-    ProxyServerSocketSend

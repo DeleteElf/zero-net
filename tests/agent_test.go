@@ -87,6 +87,8 @@ func TestHostAgent(t *testing.T) {
 		SignSalt: "2fbbdf99eae1675484a48e8310db1ee42d3bd6fdbc5e3f3755af848b23cc9817",
 	}
 	testMgr = agent.NewManagePlatform(cfg)
+	testMgr.ConnectToPlatform()
+	go testMgr.Hearts()
 	func() {
 		for {
 			if testMgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
