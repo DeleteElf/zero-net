@@ -98,7 +98,7 @@ func (mgr *ManagePlatform) sendJson(v any) error {
 
 func (mgr *ManagePlatform) send(msg string) error {
 	if mgr.wsConn != nil {
-		slog.Info("发送消息：", slog.Any("msg", msg))
+		slog.Debug("发送注册消息：", slog.Any("msg", msg))
 		return mgr.wsConn.WriteMessage(websocket.TextMessage, []byte(msg))
 	}
 	return nil
