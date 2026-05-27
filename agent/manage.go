@@ -68,15 +68,13 @@ func (mgr *ManagePlatform) ConnectToPlatform() {
 	if err != nil {
 		return
 	}
+	mgr.wsConn = ws
 	data := PlatformActionInfo{
 		Action: ACTION_REG,
 		From:   "host",
 		Info:   mgr.config.Data,
 	}
-	if err = mgr.sendJson(data); err != nil {
-		return
-	}
-	mgr.wsConn = ws
+	_ = mgr.sendJson(data)
 }
 
 func (mgr *ManagePlatform) OnClosing() {

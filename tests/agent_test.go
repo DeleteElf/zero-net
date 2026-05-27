@@ -89,27 +89,25 @@ func TestHostAgent(t *testing.T) {
 	testMgr = agent.NewManagePlatform(cfg)
 	testMgr.ConnectToPlatform()
 	go testMgr.Hearts()
-	func() {
-		for {
-			if testMgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
-				break
-			}
-			if err := testMgr.ListenAgentConnect(func(sock *streams.Socket) {
-				slog.Debug("新的客户端接入：", slog.String("id", sock.Id))
-				go agentSocketHandler(sock)
-			}, func(sock *streams.Socket) {
-				slog.Debug("客户端断开连接：", slog.String("id", sock.Id))
-			}); err != nil {
-				slog.Debug("未与管理平台连接成功，5秒后重试！", slog.Any("err", err))
-				time.Sleep(5 * time.Second)
-			}
-			if !testMgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
-				slog.Debug("与管理平台断开连接，5秒后重试！")
-				time.Sleep(5 * time.Second)
-			}
+	for {
+		if testMgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
+			break
 		}
-		slog.Debug("与管理平台结束连接！")
-	}()
+		if err := testMgr.ListenAgentConnect(func(sock *streams.Socket) {
+			slog.Debug("新的客户端接入：", slog.String("id", sock.Id))
+			go agentSocketHandler(sock)
+		}, func(sock *streams.Socket) {
+			slog.Debug("客户端断开连接：", slog.String("id", sock.Id))
+		}); err != nil {
+			slog.Debug("未与管理平台连接成功，5秒后重试！", slog.Any("err", err))
+			time.Sleep(5 * time.Second)
+		}
+		if !testMgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
+			slog.Debug("与管理平台断开连接，5秒后重试！")
+			time.Sleep(5 * time.Second)
+		}
+	}
+	slog.Debug("与管理平台结束连接！")
 	testMgr.Close()
 }
 
@@ -180,7 +178,7 @@ func TestClientAgent(t *testing.T) {
 	}
 	cli := ConnectClientAgent(request, cfg)
 	for {
-		if cli.IsClosed {
+		if cli == nil || cli.IsClosed {
 			break
 		}
 		_, _ = cli.Socket.Ping(0)
