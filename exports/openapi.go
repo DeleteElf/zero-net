@@ -525,8 +525,8 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 				if managerCtx == nil || managerCtx.IsClosed {
 					break
 				}
-				slog.Debug("监听管理平台的websocket发生错误，5秒后重试！", slog.Any("err", err1))
-				time.Sleep(5 * time.Second)
+				slog.Debug("监听管理平台的websocket发生错误，3秒后重试！", slog.Any("err", err1))
+				time.Sleep(3 * time.Second)
 			}
 		}
 		slog.Debug("监听管理平台的协程已退出！")
