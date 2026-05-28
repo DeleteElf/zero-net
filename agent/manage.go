@@ -45,6 +45,7 @@ type ManagePlatform struct {
 	Agents map[int]*Agent
 	config *Config
 
+	heartTicker *time.Ticker
 	//Server          *server.Server //目前代理中心，只能在未建立quic通讯前打通路由，因此不能在此建立服务对象
 	lastMessageTime time.Time
 }
@@ -58,6 +59,7 @@ func NewManagePlatform(cfg *Config) *ManagePlatform {
 	}
 	mgr.config.Id = time.Now().UnixNano()
 	mgr.IsClosed = false
+	mgr.SetOnCloseHandler(mgr)
 	return mgr
 }
 
@@ -79,14 +81,20 @@ func (mgr *ManagePlatform) ConnectToPlatform() {
 	_ = mgr.sendJson(data)
 }
 
-func (mgr *ManagePlatform) OnClosing() {
+func (mgr *ManagePlatform) OnClosing() bool {
+	slog.Debug("正在断开管理平台的连接...")
+	if mgr.heartTicker != nil {
+		mgr.heartTicker.Stop()
+		mgr.heartTicker = nil
+	}
+	return true
+}
+
+func (mgr *ManagePlatform) OnClosed() {
 	if mgr.wsConn != nil {
 		_ = mgr.wsConn.Close()
 		mgr.wsConn = nil
 	}
-}
-
-func (mgr *ManagePlatform) OnClosed() {
 	slog.Debug("管理平台已经断开！")
 }
 
@@ -109,10 +117,15 @@ func (mgr *ManagePlatform) send(msg string) error {
 func (mgr *ManagePlatform) Hearts() {
 	tickerDuration := time.Duration(mgr.config.Hearts) * time.Second
 	expireDuration := time.Duration(mgr.config.Hearts+10) * time.Second
-	ticker := time.NewTicker(tickerDuration)
-	defer ticker.Stop()
+	mgr.heartTicker = time.NewTicker(tickerDuration)
+	defer func() {
+		if mgr.heartTicker != nil {
+			mgr.heartTicker.Stop()
+			mgr.heartTicker = nil
+		}
+	}()
 	id := mgr.config.Id
-	for range ticker.C {
+	for range mgr.heartTicker.C {
 		if mgr.wsConn == nil {
 			break
 		}
@@ -145,8 +158,7 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect strea
 		}
 		_, msg, err := mgr.wsConn.ReadMessage()
 		if err != nil {
-			slog.Error("mgr return message error:", slog.Any("err", err))
-			break
+			return err
 		}
 		slog.Debug("mgr return message:", slog.Any("msg", msg))
 		var proxy ActionProxy
@@ -178,12 +190,6 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect strea
 			if i == 1 {
 				proxyInfo.ProxyAddr = proxyInfo.ProxyExternalIp + ":" + proxyInfo.ProxyExternalPort
 			}
-			//slog.Debug("从管理平台获取的代理地址：", slog.String("address", proxyInfo.ProxyAddr))
-			//proxyAddr, err := net.ResolveUDPAddr("udp", proxyInfo.ProxyAddr)
-			//if err != nil { //检查代理地址是否有效
-			//	slog.Info("mgr resp proxy invalid", slog.String("addr", proxyInfo.ProxyAddr), slog.Any("err", err))
-			//	continue
-			//}
 			if mgr.Agents[proxyInfo.Idx] == nil { //如果这个代理还没有连接，则进行连接
 				slog.Debug("正在连接代理授权地址...", slog.String("addr", proxyInfo.ProxyAddr), slog.Int("idx", proxyInfo.Idx))
 				conn, proxyAddr, err := streams.NewUdpSocketClient(proxyInfo.ProxyAddr)
@@ -191,13 +197,9 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect strea
 					slog.Error("连接代理服务器失败", slog.Any("err", err))
 					continue
 				}
-				//agent, err := NewAgentService(mgr.Server.NetConn, proxyAddr, uint32(proxyInfo.Idx), 1)
 				agent, err := NewAgentService(conn, proxyAddr, uint32(proxyInfo.Idx), 1, mgr.config)
 				if err != nil {
 					slog.Error("连接代理失败", slog.Any("err", err))
-					//if agent.NetConn != nil {
-					//	_ = agent.NetConn.Close()
-					//}
 					continue
 				}
 				agent.Proxy = &proxyInfo
@@ -206,9 +208,6 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect strea
 				go agent.Server.StartListen(onDisconnect)
 				mgr.Agents[proxyInfo.Idx] = agent //连接成功即可
 				slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
-				//} else {
-				//	_ = mgr.Agents[proxyInfo.Idx].addAuthAgent(uint32(proxyInfo.Idx), 1)
-				//	slog.Debug("代理服务已存在，继续使用！", slog.Int("idx", proxyInfo.Idx))
 			}
 			break
 		}

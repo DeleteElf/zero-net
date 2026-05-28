@@ -522,15 +522,14 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 				delete(socketMap, sock.Id)
 			})
 			if err1 != nil {
-				slog.Debug("监听管理平台的websocket发生错误，5秒后重试！", slog.Any("err", err))
-				time.Sleep(5 * time.Second)
-				continue
-			}
-			if !managerCtx.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
-				slog.Debug("与管理平台断开连接，5秒后重试！")
+				if managerCtx == nil || managerCtx.IsClosed {
+					break
+				}
+				slog.Debug("监听管理平台的websocket发生错误，5秒后重试！", slog.Any("err", err1))
 				time.Sleep(5 * time.Second)
 			}
 		}
+		slog.Debug("监听管理平台的协程已退出！")
 	}()
 	return C.Success
 }
