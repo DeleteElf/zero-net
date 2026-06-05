@@ -243,6 +243,26 @@ func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
 	return C.Closed
 }
 
+//export ClientChannelClose
+func ClientChannelClose(chnIdx C.int) C.int {
+	if clientCtx == nil {
+		slog.Warn("未检索到有效的客户端！")
+		return C.ErrorContext
+	}
+	clientCtx.CloseChannel(int(chnIdx))
+	count := 0
+	for _, channel := range clientCtx.Socket.StreamChannels {
+		if channel != nil {
+			count++
+		}
+	}
+	if count == 0 {
+		clientCtx.Close()
+		return C.Closed
+	}
+	return C.Success
+}
+
 //export ServerCreate
 func ServerCreate(config *C.NetworkData) C.int {
 	if config == nil {

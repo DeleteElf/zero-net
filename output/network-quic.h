@@ -126,6 +126,7 @@ int ClientClose(void);
 int ClientConnect(int channelCount, NetworkData* config);
 int ClientChannelReceive(int chnIdx, NetworkData* data);
 int ClientChannelSend(int chnIdx, NetworkData* data);
+int ClientChannelClose(int chnIdx);
 
 int ServerCreate(NetworkData* config);
 int ServerClose(void);
