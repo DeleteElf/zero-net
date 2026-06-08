@@ -193,14 +193,37 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		//slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
-
+	if clientCtx.Socket == nil {
+		return C.Closed
+	}
+	socket := clientCtx.Socket
+	if socket.IsClosed {
+		return C.Closed
+	}
 	channelId := int(chnIdx)
-	_, err := clientCtx.Socket.ReceiveDataToBuffer(channelId) //这个会卡住等待
+	_, err := socket.ReceiveDataToBuffer(channelId) //这个会卡住等待
 	if err != nil {
 		slog.Warn(err.Error())
 		return C.ErrorClose
 	}
-	buffer := clientCtx.Socket.StreamChannels[channelId].Buffer
+	if clientCtx == nil {
+		return C.Closed
+	}
+	if clientCtx.IsClosed {
+		//slog.Warn("请先连接服务端！")
+		return C.Closed
+	}
+	if clientCtx.Socket == nil {
+		return C.Closed
+	}
+	if socket.IsClosed {
+		return C.Closed
+	}
+	if socket.StreamChannels[channelId] == nil {
+		return C.Closed
+	}
+	channel := socket.StreamChannels[channelId]
+	buffer := channel.Buffer
 	if buffer == nil {
 		return C.ErrorBuffer
 	}
@@ -213,8 +236,8 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		data.len = C.int(copySize)
 		buffer.Offset += copySize
 	}
-	if buffer.Offset >= bufferSize && channelId < clientCtx.Socket.ChannelCount {
-		clientCtx.Socket.StreamChannels[channelId].Buffer = nil
+	if buffer.Offset >= bufferSize && channelId < socket.ChannelCount {
+		channel.Buffer = nil
 	}
 	return C.Success
 }
@@ -232,16 +255,26 @@ func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
 		slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
-	if clientCtx.Socket == nil || clientCtx.Socket.IsClosed {
+	if clientCtx.Socket == nil {
 		return C.Closed
 	}
-	success, err := clientCtx.Socket.Send(int(chnIdx), FromBytes(data))
-	if err != nil {
-		//slog.Error("客户端发送数据发生错误", slog.Any("err", err))
-		return C.Error
-	}
-	if success {
-		return C.Success
+	{
+		socket := clientCtx.Socket
+		if socket != nil {
+			socket.LockClosing()
+			defer socket.UnlockClosing()
+			if socket.IsClosed {
+				return C.Closed
+			}
+			success, err := socket.Send(int(chnIdx), FromBytes(data))
+			if err != nil {
+				//slog.Error("客户端发送数据发生错误", slog.Any("err", err))
+				return C.Error
+			}
+			if success {
+				return C.Success
+			}
+		}
 	}
 	return C.Closed
 }
