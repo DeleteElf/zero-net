@@ -109,7 +109,7 @@ func SetOnDisConnectedCallback(callback C.MessageCallback) C.int {
 //export ClientClose
 func ClientClose() C.int {
 	if clientCtx == nil {
-		slog.Warn("未检索到有效的客户端！")
+		//slog.Warn("未检索到有效的客户端！")
 		return C.ErrorContext
 	}
 	clientCtx.Close()
@@ -190,7 +190,7 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		return C.ErrorContext
 	}
 	if clientCtx.IsClosed {
-		slog.Warn("请先连接服务端！")
+		//slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
 
@@ -234,7 +234,7 @@ func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
 	}
 	success, err := clientCtx.Socket.Send(int(chnIdx), FromBytes(data))
 	if err != nil {
-		slog.Error("客户端发送数据发生错误", slog.Any("err", err))
+		//slog.Error("客户端发送数据发生错误", slog.Any("err", err))
 		return C.Error
 	}
 	if success {
@@ -246,7 +246,7 @@ func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
 //export ClientChannelClose
 func ClientChannelClose(chnIdx C.int) C.int {
 	if clientCtx == nil {
-		slog.Warn("未检索到有效的客户端！")
+		//slog.Warn("未检索到有效的客户端！")
 		return C.ErrorContext
 	}
 	clientCtx.CloseChannel(int(chnIdx))
@@ -312,7 +312,7 @@ func ServerClose() C.int {
 //export ServerStartListen
 func ServerStartListen() C.int {
 	if serverCtx == nil {
-		slog.Warn("请先创建服务端实例！")
+		slog.Warn("未检测到有效的服务上下文！")
 		return C.ErrorContext
 	}
 	go serverCtx.StartListen(func(sock *streams.Socket) {
@@ -326,7 +326,7 @@ func ServerStartListen() C.int {
 //export ServerSocketClose
 func ServerSocketClose(clientId *C.char) C.int {
 	if serverCtx == nil {
-		slog.Warn("请先创建服务端实例！")
+		slog.Warn("未检测到有效的服务上下文！")
 		return C.ErrorContext
 	}
 	cliId := C.GoString(clientId)
@@ -348,7 +348,7 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 		return C.ErrorParam
 	}
 	if serverCtx == nil {
-		slog.Warn("请先创建服务端实例！")
+		//slog.Warn("请先创建服务端实例！")
 		return C.ErrorContext
 	}
 	cliId := C.GoString(clientId)
@@ -379,7 +379,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		return C.ErrorParam
 	}
 	if serverCtx == nil && managerCtx == nil {
-		slog.Warn("请先创建服务端实例！")
+		slog.Warn("未检测到有效的服务上下文！")
 		return C.ErrorContext
 	}
 	for {
@@ -447,7 +447,7 @@ func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkD
 		return C.ErrorParam
 	}
 	if serverCtx == nil {
-		slog.Warn("请先创建服务端实例！")
+		slog.Warn("未检测到有效的服务上下文！")
 		return C.ErrorContext
 	}
 	cliId := C.GoString(clientId)
@@ -557,7 +557,7 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 //export ProxyServerSocketClose
 func ProxyServerSocketClose(clientId *C.char) C.int {
 	if managerCtx == nil {
-		slog.Warn("请先创建服务端代理实例！")
+		slog.Warn("未检测到有效的服务上下文！")
 		return C.ErrorContext
 	}
 	cliId := C.GoString(clientId)
