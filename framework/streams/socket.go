@@ -105,6 +105,7 @@ func (s *Socket) CreateChannels(count int) {
 				s.channelEditLock.Lock()
 				if index < len(s.StreamChannels) && s.StreamChannels[index] != nil {
 					s.StreamChannels[index].Close()
+					s.StreamChannels[index] = nil
 				}
 				s.channelEditLock.Unlock()
 				if s.OnDisconnect != nil {

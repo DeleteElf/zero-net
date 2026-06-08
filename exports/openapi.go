@@ -251,9 +251,11 @@ func ClientChannelClose(chnIdx C.int) C.int {
 	}
 	clientCtx.CloseChannel(int(chnIdx))
 	count := 0
-	for _, channel := range clientCtx.Socket.StreamChannels {
-		if channel != nil {
-			count++
+	if clientCtx.Socket != nil {
+		for _, channel := range clientCtx.Socket.StreamChannels {
+			if channel != nil {
+				count++
+			}
 		}
 	}
 	if count == 0 {
