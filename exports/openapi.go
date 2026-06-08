@@ -210,7 +210,6 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		return C.Closed
 	}
 	if clientCtx.IsClosed {
-		//slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
 	if clientCtx.Socket == nil {
@@ -219,7 +218,7 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 	if socket.IsClosed {
 		return C.Closed
 	}
-	if socket.StreamChannels[channelId] == nil {
+	if len(socket.StreamChannels) == 0 || socket.StreamChannels[channelId] == nil {
 		return C.Closed
 	}
 	channel := socket.StreamChannels[channelId]
@@ -403,8 +402,6 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 	}
 	success, err := sock.Send(int(chnIdx), FromBytes(data))
 	if err != nil {
-		slog.Error("写入流发生错误", slog.Any("err", err))
-		//_ = serverCtx.CloseSocket(cliId)
 		return C.ErrorClose
 	}
 	if success {

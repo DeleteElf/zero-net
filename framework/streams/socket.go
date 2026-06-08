@@ -152,7 +152,7 @@ func (s *Socket) Send(channelId int, data []byte) (bool, error) {
 	if channelId >= s.ChannelCount {
 		return false, errors.New("超过通道允许范围！")
 	}
-	if s.StreamChannels[channelId] == nil {
+	if len(s.StreamChannels) == 0 || s.StreamChannels[channelId] == nil {
 		return false, errors.New("通道未初始化！")
 	}
 	return s.StreamChannels[channelId].Send(data)
