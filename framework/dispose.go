@@ -44,3 +44,10 @@ func (c *CloseableObject) Close() {
 		}
 	}
 }
+
+func (c *CloseableObject) LockClosing() {
+	c.closeLock.Lock()
+}
+func (c *CloseableObject) UnlockClosing() {
+	c.closeLock.Unlock()
+}

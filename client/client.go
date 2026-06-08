@@ -37,10 +37,14 @@ func NewClient(addr string, id string) *Client {
 }
 
 func (cli *Client) CloseChannel(channelId int) bool {
-	if cli.Socket != nil && len(cli.Socket.StreamChannels) > channelId &&
-		cli.Socket.StreamChannels[channelId] != nil {
-		cli.Socket.StreamChannels[channelId].Close()
-		cli.Socket.StreamChannels[channelId] = nil
+	cli.LockClosing()
+	defer cli.UnlockClosing()
+	if !cli.IsClosed && cli.Socket != nil {
+		socket := cli.Socket
+		if len(socket.StreamChannels) > channelId && socket.StreamChannels[channelId] != nil {
+			socket.StreamChannels[channelId].Close()
+			socket.StreamChannels[channelId] = nil
+		}
 	}
 	return true
 }

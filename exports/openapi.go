@@ -232,6 +232,9 @@ func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
 		slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
+	if clientCtx.Socket == nil || clientCtx.Socket.IsClosed {
+		return C.Closed
+	}
 	success, err := clientCtx.Socket.Send(int(chnIdx), FromBytes(data))
 	if err != nil {
 		//slog.Error("客户端发送数据发生错误", slog.Any("err", err))
@@ -252,7 +255,8 @@ func ClientChannelClose(chnIdx C.int) C.int {
 	clientCtx.CloseChannel(int(chnIdx))
 	count := 0
 	if clientCtx.Socket != nil {
-		for _, channel := range clientCtx.Socket.StreamChannels {
+		socket := clientCtx.Socket
+		for _, channel := range socket.StreamChannels {
 			if channel != nil {
 				count++
 			}
