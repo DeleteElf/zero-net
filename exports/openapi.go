@@ -223,6 +223,9 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		return C.Closed
 	}
 	channel := socket.StreamChannels[channelId]
+	if channel == nil {
+		return C.Closed
+	}
 	buffer := channel.Buffer
 	if buffer == nil {
 		return C.ErrorBuffer
