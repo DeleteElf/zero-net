@@ -1,5 +1,6 @@
 package client
 
+import "C"
 import (
 	"context"
 	"errors"
@@ -37,21 +38,17 @@ func NewClient(addr string, id string) *Client {
 }
 
 func (cli *Client) CloseChannel(channelId int) bool {
-	cli.LockClosing()
-	defer cli.UnlockClosing()
 	if !cli.IsClosed && cli.Socket != nil {
-		socket := cli.Socket
-		if len(socket.StreamChannels) > channelId && socket.StreamChannels[channelId] != nil {
-			socket.StreamChannels[channelId].Close()
-			socket.StreamChannels[channelId] = nil
-		}
+		return cli.Socket.CloseChannel(channelId)
 	}
-	return true
+	return false
 }
 func (cli *Client) OnClosing() bool {
 	if cli.Socket != nil {
+		slog.Debug("正在关闭客户端的socket！")
 		cli.Socket.Close()
 		cli.Socket = nil
+		slog.Debug("客户端的socket已关闭！")
 	}
 	if cli.quicConn != nil {
 		_ = cli.quicConn.CloseWithError(0, "close")
@@ -166,35 +163,46 @@ func (cli *Client) ConnectToAgent(channelCount int, conn net.PacketConn, addr ne
 	}
 }
 
-func (cli *Client) processStream(stream *quic.Stream, onDisconnect streams.SocketCallbackFunc) {
-	streamId := stream.StreamID()
-	info, err := streams.ReadStreamInfo(stream)
-	if err != nil {
-		slog.Error("获取流信息失败", slog.Any("streamId", streamId), slog.Any("err", err))
-		_ = streams.CloseStream(stream)
-		return
+func (cli *Client) Send(channleId int, data []byte) (bool, error) {
+	if cli.IsClosed {
+		return false, errors.New("client is closed")
 	}
-	if err := streams.ValidateStreamInfo(info); err != nil {
-		slog.Warn("无效的流信息", slog.Any("err", err))
-		_ = streams.CloseStream(stream)
-		return
+	if cli.Socket == nil {
+		return false, errors.New("socket is null")
 	}
-	if info.Index < 0 || info.Index >= cli.Socket.ChannelCount {
-		slog.Error("无效的通道", slog.Any("chn", info.Index))
-		_ = streams.CloseStream(stream)
-		return
-	}
-	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId), slog.String("clientId", info.Id))
-	go cli.Socket.HandleChannelStreamData(info.Index, stream)
+	return cli.Socket.Send(channleId, data)
+
 }
 
-func (cli *Client) waitConn() *quic.Conn {
-	for i := 0; i < 200; i++ {
-		tmp := cli.quicConn
-		if tmp != nil {
-			return tmp
-		}
-		time.Sleep(16 * time.Millisecond)
-	}
-	return nil
-}
+//func (cli *Client) processStream(stream *quic.Stream, onDisconnect streams.SocketCallbackFunc) {
+//	streamId := stream.StreamID()
+//	info, err := streams.ReadStreamInfo(stream)
+//	if err != nil {
+//		slog.Error("获取流信息失败", slog.Any("streamId", streamId), slog.Any("err", err))
+//		_ = streams.CloseStream(stream)
+//		return
+//	}
+//	if err := streams.ValidateStreamInfo(info); err != nil {
+//		slog.Warn("无效的流信息", slog.Any("err", err))
+//		_ = streams.CloseStream(stream)
+//		return
+//	}
+//	if info.Index < 0 || info.Index >= cli.Socket.ChannelCount {
+//		slog.Error("无效的通道", slog.Any("chn", info.Index))
+//		_ = streams.CloseStream(stream)
+//		return
+//	}
+//	slog.Info("启动通道通讯", slog.Int("chn", info.Index), slog.Any("streamId", streamId), slog.String("clientId", info.Id))
+//	go cli.Socket.HandleChannelStreamData(info.Index, stream)
+//}
+
+//func (cli *Client) waitConn() *quic.Conn {
+//	for i := 0; i < 200; i++ {
+//		tmp := cli.quicConn
+//		if tmp != nil {
+//			return tmp
+//		}
+//		time.Sleep(16 * time.Millisecond)
+//	}
+//	return nil
+//}

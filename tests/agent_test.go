@@ -120,9 +120,12 @@ func ConnectClientAgent(request *agent.Requst, config *agent.Config) *client.Cli
 	cli := client.NewClient(proxy.ProxyAddr, request.CliId) //尝试连接本机服务
 	agt, err := agent.NewAgent(cli.ServerAddress, uint32(proxy.Idx), 0, config)
 	if err == nil && agt != nil {
-		sock := agt.Socket
-		cli.ConnectToAgent(3, sock, agt.RemoteAddress, func(sock *streams.Socket) {
+		cli.ConnectToAgent(3, agt.Socket, agt.RemoteAddress, func(sock *streams.Socket) {
 			slog.Debug("socket已经断开===》！", slog.String("id", sock.Id))
+			if agt.Socket != nil {
+				slog.Debug("正在与代理断开连接...")
+				_ = agt.Socket.Close()
+			}
 		}) //创建udp网络
 	}
 	if cli.Socket == nil {

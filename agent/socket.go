@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"github.com/pkg/errors"
 	"net"
 	"time"
 )
@@ -15,6 +16,9 @@ type Socket struct {
 }
 
 func (a *Socket) ReadFrom(p []byte) (int, net.Addr, error) {
+	if a.Conn == nil {
+		return 0, nil, errors.New("agent socket`s conn is null")
+	}
 	dataLen, addr, err := a.Conn.ReadFrom(a.ReadData)
 	if dataLen <= AGENT_HEAD_SIZE {
 		return 0, addr, err
@@ -30,6 +34,9 @@ func (a *Socket) WriteTo(p []byte, addr net.Addr) (int, error) {
 		return -1, fmt.Errorf("too large")
 	}
 	copy(a.WriteData[AGENT_HEAD_SIZE:bufLen], p)
+	if a.Conn == nil {
+		return 0, errors.New("agent socket`s conn is null")
+	}
 	writeLen, err := a.Conn.WriteTo(a.WriteData[0:bufLen], addr)
 	if writeLen < AGENT_HEAD_SIZE {
 		return writeLen, err

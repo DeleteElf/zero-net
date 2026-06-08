@@ -73,6 +73,16 @@ func NewSocket(id string, channelCount int, onDisconnect SocketCallbackFunc) *So
 	sock.CreateChannels(channelCount)
 	return sock
 }
+func (s *Socket) CloseChannel(channelIndex int) bool {
+	s.channelEditLock.Lock()
+	defer s.channelEditLock.Unlock()
+	if len(s.StreamChannels) > channelIndex && s.StreamChannels[channelIndex] != nil {
+		s.StreamChannels[channelIndex].Close()
+		s.StreamChannels[channelIndex] = nil
+		return true
+	}
+	return false
+}
 
 func (s *Socket) OnClosing() bool {
 	s.channelEditLock.Lock()
@@ -97,6 +107,8 @@ func (s *Socket) OnClosed() {
 
 // CreateChannels 创建通道
 func (s *Socket) CreateChannels(count int) {
+	s.channelEditLock.Lock()
+	defer s.channelEditLock.Unlock()
 	s.StreamChannels = make([]*StreamChannel, count) //创建通道列表切片
 	for i := 0; i < count; i++ {
 		s.StreamChannels[i] = NewStreamChannel(s.Id, i) //make(chan StreamChannelData, 3) //创建通道实例
@@ -147,7 +159,7 @@ func (s *Socket) ReceiveDataToBuffer(channelId int) (bool, error) {
 
 func (s *Socket) Send(channelId int, data []byte) (bool, error) {
 	if s.IsClosed {
-		return false, nil
+		return false, errors.New("socket is closed")
 	}
 	if channelId >= s.ChannelCount {
 		return false, errors.New("超过通道允许范围！")
