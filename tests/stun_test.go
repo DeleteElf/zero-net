@@ -10,7 +10,8 @@ import (
 func TestStunClient(t *testing.T) {
 	utils.InitLog(slog.LevelDebug, nil)
 	client := stun.NewStunClient()
-	err := client.Connect("stun:127.0.0.1:3478")
+	err := client.Connect("stun:192.168.199.22:3478", "test")
+	//err := client.Connect("stun:127.0.0.1:3478")
 	if err != nil {
 		slog.Error("连接stun服务时发生错误！", slog.Any("err", err))
 	} else {

@@ -13,7 +13,7 @@ func NewStunClient() *StunClient {
 	return &StunClient{}
 }
 
-func (stunClient *StunClient) Connect(address string) error {
+func (stunClient *StunClient) Connect(address, token string) error {
 	//address stun:stun.l.google.com:19302
 	// 1. 创建指向公共 STUN 服务器的 UDP 连接 (这里以谷歌公共服务器为例)
 	u, err := stun.ParseURI(address)
@@ -32,7 +32,9 @@ func (stunClient *StunClient) Connect(address string) error {
 
 	// 2. 构建一个绑定请求 (Binding Request)
 	message := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
-	message.Add(stun.AttrUsername, []byte("test"))
+	if len(token) > 0 {
+		message.Add(stun.AttrUsername, []byte(token))
+	}
 	// 3. 发送请求并监听 STUN 服务器的响应
 	if err := c.Do(message, func(res stun.Event) {
 		if res.Error != nil {
