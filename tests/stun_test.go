@@ -9,7 +9,7 @@ import (
 
 func TestStunClient(t *testing.T) {
 	utils.InitLog(slog.LevelDebug, nil)
-	client := stun.NewStunClient()
+	client := stun.NewClient()
 	err := client.Connect("stun:192.168.199.22:3478", "test")
 	//err := client.Connect("stun:127.0.0.1:3478")
 	if err != nil {
