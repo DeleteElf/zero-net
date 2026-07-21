@@ -13,6 +13,7 @@ type Client struct {
 	conn            *websocket.Conn
 	heartTicker     *time.Ticker
 	lastMessageTime time.Time
+	lastHeartTime   time.Time
 	HeartTimeout    time.Duration
 	framework.CloseableObject
 	OnMessage      func(msg jsonhelper.JsonObject)
@@ -75,7 +76,7 @@ func (c *Client) Connect(address, heartMessage string) error {
 func (c *Client) Heart(heartMessage string) {
 	tickerDuration := c.HeartTimeout * time.Second
 	expireDuration := (c.HeartTimeout + 10) * time.Second
-	c.heartTicker = time.NewTicker(tickerDuration)
+	c.heartTicker = time.NewTicker(time.Second) //每秒检查一次
 	defer func() {
 		if c.heartTicker != nil {
 			c.heartTicker.Stop()
@@ -94,7 +95,10 @@ func (c *Client) Heart(heartMessage string) {
 			c.Close()
 			break
 		}
-		_ = c.Send(heartMessage)
+		if c.lastHeartTime.Add(tickerDuration).Compare(time.Now()) < 0 {
+			c.lastHeartTime = time.Now()
+			_ = c.Send(heartMessage)
+		}
 	}
 	slog.Warn("stop ping heart")
 }
