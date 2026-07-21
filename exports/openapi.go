@@ -14,6 +14,7 @@ import (
 	"github.com/DeleteElf/zero-net/framework/streams"
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/DeleteElf/zero-net/server"
+	"github.com/DeleteElf/zero-net/websocket"
 	"log/slog"
 	"reflect"
 	"time"
@@ -606,12 +607,78 @@ func ProxyServerSocketClose(clientId *C.char) C.int {
 //endregion
 //region websocket相关
 
-func WebSocketCreate() {
+var websocketClient *websocket.Client
 
+//export WebSocketCreate
+func WebSocketCreate(config *C.NetworkData) C.int {
+	if config == nil {
+		return C.ErrorParam
+	}
+	jsonObject, err := utils.GetJsonObject(FromBytes(config))
+	if err != nil {
+		return C.ErrorParam
+	}
+	data := jsonObject["data"].(map[string]interface{})
+	if data == nil {
+		return C.ErrorParam
+	}
+	url := jsonObject["url"].(string)
+
+	websocketClient = websocket.NewClient()
+	err = websocketClient.Connect(url, "")
+	if err != nil {
+		return C.Error
+	}
+	return C.Success
 }
 
-func WebSocketClose() {
+//export WebSocketClose
+func WebSocketClose() C.int {
+	if websocketClient != nil {
+		websocketClient.Close()
+		websocketClient = nil
+	}
+	return C.Success
+}
 
+// var onWebSocketMessageCallback C.MessageCallback
+//var onWebSocketConnectedCallback C.MessageCallback
+//var onWebSocketDisconnectedCallback C.MessageCallback
+
+//export SetOnWebSocketMessageCallback
+func SetOnWebSocketMessageCallback(callback C.MessageCallback) {
+	if websocketClient != nil {
+		//onWebSocketMessageCallback = callback
+		websocketClient.OnMessage = func(msg string) {
+			if callback != nil {
+				C.callMessageCallback(callback, C.CString(msg))
+			}
+		}
+	}
+}
+
+//export SetOnWebSocketConnectedCallback
+func SetOnWebSocketConnectedCallback(callback C.MessageCallback) {
+	if websocketClient != nil {
+		//onWebSocketConnectedCallback = callback
+		websocketClient.OnConnected = func(msg string) {
+			if callback != nil {
+				C.callMessageCallback(callback, C.CString(msg))
+			}
+		}
+	}
+}
+
+//export SetOnWebSocketDisconnectedCallback
+func SetOnWebSocketDisconnectedCallback(callback C.MessageCallback) {
+	if websocketClient != nil {
+		//onWebSocketDisconnectedCallback = callback
+		websocketClient.OnDisconnected = func(msg string) {
+			if callback != nil {
+				C.callMessageCallback(callback, C.CString(msg))
+			}
+		}
+	}
 }
 
 //endregion

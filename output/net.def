@@ -22,3 +22,9 @@ EXPORTS
 
     ProxyServerCreate
     ProxyServerSocketClose
+
+    WebSocketCreate
+    WebSocketClose
+    SetOnWebSocketMessageCallback
+    SetOnWebSocketConnectedCallback
+    SetOnWebSocketDisconnectedCallback

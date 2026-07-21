@@ -139,6 +139,12 @@ int ServerSocketChannelReceive(char* clientId, int chnIdx, NetworkData* data);
 int ProxyServerCreate(NetworkData* config);
 int ProxyServerSocketClose(char* clientId);
 
+int WebSocketCreate(NetworkData* config);
+int WebSocketClose(void);
+void SetOnWebSocketMessageCallback(MessageCallback callback);
+void SetOnWebSocketConnectedCallback(MessageCallback callback);
+void SetOnWebSocketDisconnectedCallback(MessageCallback callback);
+
 #ifdef __cplusplus
 }
 #endif

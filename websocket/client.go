@@ -16,9 +16,9 @@ type Client struct {
 	lastHeartTime   time.Time
 	HeartTimeout    time.Duration
 	framework.CloseableObject
-	OnMessage      func(msg jsonhelper.JsonObject)
-	OnConnected    func()
-	OnDisconnected func()
+	OnMessage      func(msg string)
+	OnConnected    func(msg string)
+	OnDisconnected func(msg string)
 }
 
 func NewClient() *Client {
@@ -38,7 +38,7 @@ func (c *Client) Connect(address, heartMessage string) error {
 	}
 	c.conn = ws
 	if c.OnConnected != nil {
-		c.OnConnected()
+		c.OnConnected("")
 	}
 	go func() {
 		for {
@@ -62,7 +62,7 @@ func (c *Client) Connect(address, heartMessage string) error {
 				continue
 			}
 			if c.OnMessage != nil {
-				c.OnMessage(result)
+				c.OnMessage(string(msg))
 			}
 		}
 	}()
@@ -106,7 +106,7 @@ func (c *Client) Heart(heartMessage string) {
 func (c *Client) OnClosing() bool {
 	slog.Debug("正在断开websocket连接...")
 	if c.OnDisconnected != nil {
-		c.OnDisconnected()
+		c.OnDisconnected("")
 	}
 	if c.heartTicker != nil {
 		c.heartTicker.Stop()
