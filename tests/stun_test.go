@@ -1,8 +1,8 @@
 package tests
 
 import (
-	"github.com/DeleteElf/network-quic/framework/utils"
-	"github.com/DeleteElf/network-quic/stun"
+	"github.com/DeleteElf/zero-net/framework/utils"
+	"github.com/DeleteElf/zero-net/stun"
 	"log/slog"
 	"testing"
 )

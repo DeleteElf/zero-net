@@ -2,7 +2,7 @@ package tests
 
 import (
 	"fmt"
-	"github.com/DeleteElf/network-quic/framework/streams"
+	"github.com/DeleteElf/zero-net/framework/streams"
 	"testing"
 )
 

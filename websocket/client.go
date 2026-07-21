@@ -2,7 +2,7 @@ package websocket
 
 import (
 	"crypto/tls"
-	"github.com/DeleteElf/network-quic/framework"
+	"github.com/DeleteElf/zero-net/framework"
 	"github.com/deleteelf/goframework/utils/jsonhelper"
 	"github.com/gorilla/websocket"
 	"log/slog"

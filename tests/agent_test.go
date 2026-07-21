@@ -2,10 +2,10 @@ package tests
 
 import (
 	"fmt"
-	"github.com/DeleteElf/network-quic/agent"
-	"github.com/DeleteElf/network-quic/client"
-	"github.com/DeleteElf/network-quic/framework/streams"
-	"github.com/DeleteElf/network-quic/framework/utils"
+	"github.com/DeleteElf/zero-net/agent"
+	"github.com/DeleteElf/zero-net/client"
+	"github.com/DeleteElf/zero-net/framework/streams"
+	"github.com/DeleteElf/zero-net/framework/utils"
 	"log/slog"
 	"strconv"
 	"testing"

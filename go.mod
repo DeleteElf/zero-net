@@ -1,4 +1,4 @@
-module github.com/DeleteElf/network-quic
+module github.com/DeleteElf/zero-net
 
 go 1.25.0
 

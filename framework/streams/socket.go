@@ -3,8 +3,8 @@ package streams
 import (
 	"context"
 	"errors"
-	"github.com/DeleteElf/network-quic/framework"
-	"github.com/DeleteElf/network-quic/framework/utils"
+	"github.com/DeleteElf/zero-net/framework"
+	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/quic-go/quic-go"
 	"log/slog"
 	"net"

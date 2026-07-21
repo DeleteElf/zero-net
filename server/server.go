@@ -2,9 +2,9 @@ package server
 
 import (
 	"context"
-	"github.com/DeleteElf/network-quic/framework"
-	"github.com/DeleteElf/network-quic/framework/streams"
-	"github.com/DeleteElf/network-quic/framework/utils"
+	"github.com/DeleteElf/zero-net/framework"
+	"github.com/DeleteElf/zero-net/framework/streams"
+	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/quic-go/quic-go"
 	"log/slog"
 	"net"

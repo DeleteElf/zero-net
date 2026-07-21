@@ -8,8 +8,8 @@ echo "当前环境变量:${PATH}"
 echo "go编译dll，如果需要不影响qt6的调试，需要使用1.25.9的版本编译才行。1.25.0及以下已经验证不可行！！！"
 
 echo 正在删除旧版本
-rm -f ./output/libnetwork-quic.so
-rm -f ./output/libnetwork-quic.a
+rm -f ./output/libnet.so
+rm -f ./output/libnet.a
 
 
 git branch
@@ -22,9 +22,9 @@ go mod tidy
 echo "跨平台兼容性预防处理,如果有这个文件会导致后续生成so文件失败！"
 rm -f ./main/app.syso
 echo 正在生成so
-go build -buildmode=c-shared -ldflags="-s -w" -o ./output/libnetwork-quic.so ./main
+go build -buildmode=c-shared -ldflags="-s -w" -o ./output/libnet.so ./main
 echo 正在生成.a
-go build -buildmode=c-archive -ldflags="-s -w" -o ./output/libnetwork-quic.a ./main
+go build -buildmode=c-archive -ldflags="-s -w" -o ./output/libnet.a ./main
 echo "完成时间：$(date)"
 
 

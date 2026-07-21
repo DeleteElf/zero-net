@@ -1,9 +1,9 @@
 package tests
 
 import (
-	"github.com/DeleteElf/network-quic/client"
-	"github.com/DeleteElf/network-quic/framework/streams"
-	"github.com/DeleteElf/network-quic/framework/utils"
+	"github.com/DeleteElf/zero-net/client"
+	"github.com/DeleteElf/zero-net/framework/streams"
+	"github.com/DeleteElf/zero-net/framework/utils"
 	"log/slog"
 	"testing"
 	"time"

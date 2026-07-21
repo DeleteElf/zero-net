@@ -4,16 +4,16 @@ package exports
 #cgo CFLAGS: -I ../output
 
 #include <string.h>
-#include "network-quic.h"
+#include "net.h"
 */
 import "C"
 import (
 	"fmt"
-	"github.com/DeleteElf/network-quic/agent"
-	"github.com/DeleteElf/network-quic/client"
-	"github.com/DeleteElf/network-quic/framework/streams"
-	"github.com/DeleteElf/network-quic/framework/utils"
-	"github.com/DeleteElf/network-quic/server"
+	"github.com/DeleteElf/zero-net/agent"
+	"github.com/DeleteElf/zero-net/client"
+	"github.com/DeleteElf/zero-net/framework/streams"
+	"github.com/DeleteElf/zero-net/framework/utils"
+	"github.com/DeleteElf/zero-net/server"
 	"log/slog"
 	"reflect"
 	"time"
@@ -601,6 +601,17 @@ func ProxyServerSocketClose(clientId *C.char) C.int {
 	}
 	slog.Debug("socket执行关闭逻辑完成")
 	return C.Success
+}
+
+//endregion
+//region websocket相关
+
+func WebSocketCreate() {
+
+}
+
+func WebSocketClose() {
+
 }
 
 //endregion

@@ -1,7 +1,7 @@
 package stun
 
 import (
-	"github.com/DeleteElf/network-quic/framework"
+	"github.com/DeleteElf/zero-net/framework"
 	"github.com/pion/stun/v3"
 	"log/slog"
 )

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/DeleteElf/network-quic/framework/utils"
+	"github.com/DeleteElf/zero-net/framework/utils"
 	"log/slog"
 	"time"
 

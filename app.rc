@@ -8,7 +8,7 @@
 
 #define MN "NetworkQuic"
 #define MD "Network quic plugin for C"
-#define MF "network-quic.dll"
+#define MF "net.dll"
 #define MW "DeleteElf"
 #define MB "Copyright © 2026 DeleteElf. All rights reserved."
 
