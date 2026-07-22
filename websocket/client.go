@@ -18,6 +18,8 @@ type Client struct {
 	lastHeartTime   time.Time
 	HeartTimeout    time.Duration
 	framework.CloseableObject
+	//接收消息时，是否异步回调
+	AsyncMessage   bool
 	OnMessage      func(msg string)
 	OnConnected    func(msg string)
 	OnDisconnected func(msg string)
@@ -26,6 +28,7 @@ type Client struct {
 func NewClient() *Client {
 	return &Client{
 		HeartTimeout: time.Second * 50,
+		AsyncMessage: true,
 	}
 }
 
@@ -66,9 +69,13 @@ func (c *Client) Connect(address, heartMessage string) error {
 				continue
 			}
 			if c.OnMessage != nil {
-				go func() {
+				if c.AsyncMessage {
+					go func() {
+						c.OnMessage(string(msg))
+					}()
+				} else {
 					c.OnMessage(string(msg))
-				}()
+				}
 			}
 		}
 	}()
