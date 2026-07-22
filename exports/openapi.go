@@ -647,7 +647,7 @@ func WebSocketSend(msg *C.char) C.int {
 		_ = websocketClient.Send(C.GoString(msg))
 		return C.Success
 	}
-	return C.Close
+	return C.Closed
 }
 
 //export SetOnWebSocketMessageCallback
