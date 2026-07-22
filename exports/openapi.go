@@ -641,14 +641,16 @@ func WebSocketClose() C.int {
 	return C.Success
 }
 
-// var onWebSocketMessageCallback C.MessageCallback
-//var onWebSocketConnectedCallback C.MessageCallback
-//var onWebSocketDisconnectedCallback C.MessageCallback
+//export WebSocketSend
+func WebSocketSend(msg *C.char) {
+	if websocketClient != nil && !websocketClient.IsClosed {
+		_ = websocketClient.Send(C.GoString(msg))
+	}
+}
 
 //export SetOnWebSocketMessageCallback
 func SetOnWebSocketMessageCallback(callback C.MessageCallback) {
 	if websocketClient != nil {
-		//onWebSocketMessageCallback = callback
 		websocketClient.OnMessage = func(msg string) {
 			if callback != nil {
 				C.callMessageCallback(callback, C.CString(msg))
@@ -660,7 +662,6 @@ func SetOnWebSocketMessageCallback(callback C.MessageCallback) {
 //export SetOnWebSocketConnectedCallback
 func SetOnWebSocketConnectedCallback(callback C.MessageCallback) {
 	if websocketClient != nil {
-		//onWebSocketConnectedCallback = callback
 		websocketClient.OnConnected = func(msg string) {
 			if callback != nil {
 				C.callMessageCallback(callback, C.CString(msg))
@@ -672,7 +673,6 @@ func SetOnWebSocketConnectedCallback(callback C.MessageCallback) {
 //export SetOnWebSocketDisconnectedCallback
 func SetOnWebSocketDisconnectedCallback(callback C.MessageCallback) {
 	if websocketClient != nil {
-		//onWebSocketDisconnectedCallback = callback
 		websocketClient.OnDisconnected = func(msg string) {
 			if callback != nil {
 				C.callMessageCallback(callback, C.CString(msg))
