@@ -46,7 +46,8 @@ func (c *Client) Connect(address, heartMessage string) error {
 	}
 	c.conn = ws
 	if c.OnConnected != nil {
-		c.OnConnected(ws.RemoteAddr().String())
+		c.OnConnected(fmt.Sprintf("{\"local\":\"%s\",\"remote\":\"%s\"}",
+			ws.LocalAddr().String(), ws.RemoteAddr().String()))
 	}
 	c.lastMessageTime = time.Now()
 	c.lastHeartTime = time.Now()
