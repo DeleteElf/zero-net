@@ -610,7 +610,13 @@ func ProxyServerSocketClose(clientId *C.char) C.int {
 var websocketClient *websocket.Client
 
 //export WebSocketCreate
-func WebSocketCreate(config *C.NetworkData) C.int {
+func WebSocketCreate() C.int {
+	websocketClient = websocket.NewClient()
+	return C.Success
+}
+
+//export WebSocketConnect
+func WebSocketConnect(config *C.NetworkData) C.int {
 	if config == nil {
 		return C.ErrorParam
 	}
@@ -618,13 +624,7 @@ func WebSocketCreate(config *C.NetworkData) C.int {
 	if err != nil {
 		return C.ErrorParam
 	}
-	data := jsonObject["data"].(map[string]interface{})
-	if data == nil {
-		return C.ErrorParam
-	}
 	url := jsonObject["url"].(string)
-
-	websocketClient = websocket.NewClient()
 	err = websocketClient.Connect(url, "")
 	if err != nil {
 		return C.Error

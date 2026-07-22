@@ -24,6 +24,7 @@ EXPORTS
     ProxyServerSocketClose
 
     WebSocketCreate
+    WebSocketConnect
     WebSocketClose
     WebSocketSend
     SetOnWebSocketMessageCallback
