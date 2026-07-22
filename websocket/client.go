@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"crypto/tls"
+	"fmt"
 	"github.com/DeleteElf/zero-net/framework"
 	"github.com/deleteelf/goframework/utils/jsonhelper"
 	"github.com/gorilla/websocket"
@@ -20,6 +21,7 @@ type Client struct {
 	framework.CloseableObject
 	//接收消息时，是否异步回调
 	AsyncMessage   bool
+	Reason         string
 	OnMessage      func(msg string)
 	OnConnected    func(msg string)
 	OnDisconnected func(msg string)
@@ -29,6 +31,7 @@ func NewClient() *Client {
 	return &Client{
 		HeartTimeout: time.Second * 50,
 		AsyncMessage: true,
+		Reason:       "",
 	}
 }
 
@@ -47,7 +50,13 @@ func (c *Client) Connect(address, heartMessage string) error {
 	}
 	c.lastMessageTime = time.Now()
 	c.lastHeartTime = time.Now()
+	c.conn.SetCloseHandler(func(code int, text string) error {
+		c.Reason = fmt.Sprintf("{\"code\":%d,\"msg\":\"%s\"}", code, text)
+		c.Close()
+		return nil
+	})
 	go func() {
+		c.Close()
 		for {
 			if c.conn == nil {
 				break
@@ -57,13 +66,15 @@ func (c *Client) Connect(address, heartMessage string) error {
 			}
 			_, msg, err := c.conn.ReadMessage()
 			if err != nil {
-				return
+				c.Reason = fmt.Sprintf("{\"code\":%d,\"msg\":\"%s\"}", 2, err.Error())
+				break
 			}
 			c.lastMessageTime = time.Now()
 			slog.Debug("receive message:", slog.Any("msg", msg))
 			result, err := jsonhelper.GetJsonObject(msg)
 			if err != nil {
-				return
+				c.Reason = fmt.Sprintf("{\"code\":%d,\"msg\":\"%s\"}", 3, err.Error())
+				break
 			}
 			if result["Action"] == "pong" {
 				continue
@@ -89,22 +100,19 @@ func (c *Client) Heart(heartMessage string) {
 	tickerDuration := c.HeartTimeout
 	expireDuration := c.HeartTimeout + 10*time.Second
 	c.heartTicker = time.NewTicker(time.Second) //每秒检查一次
-	defer func() {
-		if c.heartTicker != nil {
-			c.heartTicker.Stop()
-			c.heartTicker = nil
-		}
-	}()
+	defer c.Close()
 	for range c.heartTicker.C {
 		if c.conn == nil {
+			//c.Reason = "{\"code\":9,\"msg\":\"no connection\"}"
 			break
 		}
 		if c.IsClosed {
+			//c.Reason = "{\"code\":0,\"msg\":\"ping time out\"}"
 			break
 		}
 		if c.lastMessageTime.Add(expireDuration).Compare(time.Now()) < 0 {
 			slog.Warn("pong time out")
-			c.Close()
+			c.Reason = "{\"code\":1,\"msg\":\"ping time out\"}"
 			break
 		}
 		if c.lastHeartTime.Add(tickerDuration).Compare(time.Now()) < 0 {
@@ -118,7 +126,8 @@ func (c *Client) Heart(heartMessage string) {
 func (c *Client) OnClosing() bool {
 	slog.Debug("正在断开websocket连接...")
 	if c.OnDisconnected != nil {
-		c.OnDisconnected(c.conn.RemoteAddr().String())
+		c.OnDisconnected(c.Reason)
+		c.Reason = ""
 	}
 	if c.heartTicker != nil {
 		c.heartTicker.Stop()
@@ -149,4 +158,11 @@ func (c *Client) Send(msg string) error {
 		return c.conn.WriteMessage(websocket.TextMessage, []byte(msg))
 	}
 	return nil
+}
+
+func (c *Client) GetLocalAddr() string {
+	return c.conn.LocalAddr().String()
+}
+func (c *Client) GetRemoteAddr() string {
+	return c.conn.RemoteAddr().String()
 }
