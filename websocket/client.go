@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var DefaultHeartMessage string = "{\"action\":\"ping\",\"from\":\"host\"}"
+
 type Client struct {
 	conn            *websocket.Conn
 	heartTicker     *time.Ticker
@@ -38,8 +40,10 @@ func (c *Client) Connect(address, heartMessage string) error {
 	}
 	c.conn = ws
 	if c.OnConnected != nil {
-		c.OnConnected("")
+		c.OnConnected(ws.RemoteAddr().String())
 	}
+	c.lastMessageTime = time.Now()
+	c.lastHeartTime = time.Now()
 	go func() {
 		for {
 			if c.conn == nil {
@@ -62,20 +66,21 @@ func (c *Client) Connect(address, heartMessage string) error {
 				continue
 			}
 			if c.OnMessage != nil {
-				c.OnMessage(string(msg))
+				go func() {
+					c.OnMessage(string(msg))
+				}()
 			}
 		}
 	}()
-	if len(heartMessage) == 0 {
-		heartMessage = "{\"Action\":\"ping\",\"From\":\"host\"}"
+	if len(heartMessage) != 0 {
+		c.Heart(heartMessage)
 	}
-	c.Heart(heartMessage)
 	return nil
 }
 
 func (c *Client) Heart(heartMessage string) {
-	tickerDuration := c.HeartTimeout * time.Second
-	expireDuration := (c.HeartTimeout + 10) * time.Second
+	tickerDuration := c.HeartTimeout
+	expireDuration := c.HeartTimeout + 10*time.Second
 	c.heartTicker = time.NewTicker(time.Second) //每秒检查一次
 	defer func() {
 		if c.heartTicker != nil {
@@ -106,7 +111,7 @@ func (c *Client) Heart(heartMessage string) {
 func (c *Client) OnClosing() bool {
 	slog.Debug("正在断开websocket连接...")
 	if c.OnDisconnected != nil {
-		c.OnDisconnected("")
+		c.OnDisconnected(c.conn.RemoteAddr().String())
 	}
 	if c.heartTicker != nil {
 		c.heartTicker.Stop()
