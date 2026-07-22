@@ -642,10 +642,12 @@ func WebSocketClose() C.int {
 }
 
 //export WebSocketSend
-func WebSocketSend(msg *C.char) {
+func WebSocketSend(msg *C.char) C.int {
 	if websocketClient != nil && !websocketClient.IsClosed {
 		_ = websocketClient.Send(C.GoString(msg))
+		return C.Success
 	}
+	return C.Close
 }
 
 //export SetOnWebSocketMessageCallback

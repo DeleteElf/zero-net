@@ -25,6 +25,7 @@ EXPORTS
 
     WebSocketCreate
     WebSocketClose
+    WebSocketSend
     SetOnWebSocketMessageCallback
     SetOnWebSocketConnectedCallback
     SetOnWebSocketDisconnectedCallback

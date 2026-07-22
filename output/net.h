@@ -141,6 +141,7 @@ int ProxyServerSocketClose(char* clientId);
 
 int WebSocketCreate(NetworkData* config);
 int WebSocketClose(void);
+int WebSocketSend(char* msg);
 void SetOnWebSocketMessageCallback(MessageCallback callback);
 void SetOnWebSocketConnectedCallback(MessageCallback callback);
 void SetOnWebSocketDisconnectedCallback(MessageCallback callback);
