@@ -311,14 +311,14 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 	result := &FecPacket{}
 	switch data[0] {
 	case RtpHeader:
-		if data[1] == 97 || data[1] == 127 { //音频数据包
+		if data[1] == AudioHeader || data[1] == AudioDynamicHeader { //音频数据包
 			//因为仅仅使用rtp packet来包装发送的数据，因此很多内容都是属于约定写死的内容
 			result.Header.ChannelId = 1
 			result.Header.DataShards = 4
 			result.Header.ParityShards = 2
 			sequenceNumber := binary.BigEndian.Uint16(data[2:])
 			result.Payload = data
-			if data[1] == 127 {
+			if data[1] == AudioDynamicHeader {
 				result.Header.Length = uint16(size - AudioHeaderLength)
 				fecShardIndex := data[12]
 				result.Header.ShardIdx = fecShardIndex + result.Header.DataShards
@@ -367,16 +367,21 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		if utils.IsBefore8(result.Header.GroupId, nextGroupId) { //已经解码成功的Id就不要了
 			return nil
 		}
-		result.Header.Idr = uint8(fecInfo >> 11 & 0x1)                      //idr 1 位
-		if result.Header.Idr == 1 && result.Header.GroupId != nextGroupId { //如果是 关键帧，则移动当前数据到本帧，并丢弃前面的数据,执行追帧
-			target := int(result.Header.GroupId)
-			if result.Header.GroupId < nextGroupId { //考虑溢出问题
-				target = int(result.Header.GroupId) + math.MaxUint8
+		result.Header.Idr = uint8(fecInfo >> 11 & 0x1) //idr 1 位
+		if result.Header.Idr == 1 {                    //如果是 关键帧，则移动当前数据到本帧，并丢弃前面的数据,执行追帧
+			if utils.IsBefore8(nextGroupId, result.Header.GroupId) {
+				slog.Debug("帧接收新的关键帧，跳到！", slog.Any("channel", result.Header.ChannelId),
+					slog.Any("groupId", result.Header.GroupId))
+
+				target := int(result.Header.GroupId)
+				if result.Header.GroupId < nextGroupId { //考虑溢出问题
+					target = int(result.Header.GroupId) + math.MaxUint8
+				}
+				for i := int(nextGroupId); i < target; i++ {
+					delete(fecGroupMap.Groups, uint8(i))
+				}
+				fecGroupMap.NextGroupId = result.Header.GroupId
 			}
-			for i := int(nextGroupId); i < target; i++ {
-				delete(fecGroupMap.Groups, uint8(i))
-			}
-			fecGroupMap.NextGroupId = result.Header.GroupId
 		}
 		//	binary.BigEndian.PutUint32(buffer[i][28:], uint32(dataShards<<22|i<<12|idrData<<11|fecPercentage<<4|channelId)) //FecInfo 增加idr信息、通道信息
 		result.Header.Header = data[0]
@@ -388,6 +393,7 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		result.Payload = data
 		result.Header.Length = uint16(size - VideoHeaderLength)
 		result.Header.Total = uint32(result.Header.DataShards) * uint32(result.Header.Length)
+
 	default:
 		if size < FecPacketHeaderLength {
 			slog.Debug("收到无效的fec数据包", slog.Int("len", size))
@@ -541,8 +547,8 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				copy(buffer[i][:VideoHeaderLength], buffer[0][:VideoHeaderLength]) //拷贝头部数据
 				binary.LittleEndian.PutUint32(buffer[i][28:],
 					uint32(dataShards)<<22|uint32(i)<<12|uint32(idrData)<<11|uint32(fecPercentage)<<4|uint32(channelId)) //FecInfo 增加idr信息、通道信息
-				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))  //SequenceNumber
-				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8) //streamPacketIndex 这个也需要变化
+				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))                                      //SequenceNumber
+				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8)                                     //streamPacketIndex 这个也需要变化
 				buffer[i][16] = packetIndex
 				buffer[i][24] = 0 //这个属性是什么并不重要
 				buffer[i][26] = 0

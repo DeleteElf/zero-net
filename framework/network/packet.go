@@ -19,10 +19,19 @@ const (
 	// RtpHeaderFlagExtension rtp头携带了扩展的信息
 	RtpHeaderFlagExtension = 0x10
 	// VideoHeader rtp头携带扩展信息后的头信息
-	VideoHeader = RtpHeader | RtpHeaderFlagExtension
+	VideoHeader        = RtpHeader | RtpHeaderFlagExtension
+	AudioHeader        = 97
+	AudioDynamicHeader = 127
 
 	CustomFecHeader   = 0x81
 	CustomMessageType = 0x11
+
+	MessageExpireTime  = 200 * time.Millisecond
+	AudioExpireTime    = 100 * time.Millisecond
+	VideoExpireTime    = 100 * time.Millisecond
+	AudioOosExpireTime = 10 * time.Millisecond
+	// AudioDataTime 音频数据包的时长
+	AudioDataTime = 10 * time.Millisecond
 )
 
 type FecGroupsMap struct {
@@ -45,12 +54,15 @@ func NewFecGroupsMap() *FecGroupsMap {
 
 // FecGroup 用于收集和组装同一 GroupID 的分片
 type FecGroup struct {
-	HeaderSample   *FecPacketHeader
-	HeaderTemplate []byte
-	Shards         [][]byte // 槽位数组，长度为 DataShards + ParityShards
-	Packets        []*FecPacket
-	Received       uint8 // 当前已收到的有效分片数
-	ExpiredAt      time.Time
+	HeaderSample    *FecPacketHeader
+	HeaderTemplate  []byte
+	Shards          [][]byte // 槽位数组，长度为 DataShards + ParityShards
+	Packets         []*FecPacket
+	Received        uint8     // 当前已收到的有效分片数
+	ExpiredAt       time.Time //预期销毁时间
+	OosTime         time.Time //当前分组的首个数据包到达时间
+	ShardCount      uint8     //当前分组的数据分片数量
+	ShardDataLength uint16
 }
 
 // FecPacketHeader 自定义分Fec数据包
