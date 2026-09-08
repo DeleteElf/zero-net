@@ -167,8 +167,8 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 		case 0x61: //标准音频
 			sequenceNumber := binary.BigEndian.Uint16(buffer[2:])
 			offset := uint16(shardIndex) - sequenceNumber%uint16(dataShards)
-			sequenceNumber = sequenceNumber + offset //计算当前的包位置
-			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber)
+			sequenceNumber = sequenceNumber + offset
+			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber) //计算当前的包位置
 			//声音每帧都偏移了一个 AudioDataTime,通过偏移量修正
 			timestamp := binary.BigEndian.Uint32(buffer[4:])
 			timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(offset) * AudioDataTime).UnixMilli())
@@ -176,15 +176,14 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 		case 0x7f: //动态音频
 			buffer[1] = 0x61 //通过动态音频获取的 packetType为127，我们需要修改成97
 			sequenceNumber := binary.BigEndian.Uint16(buffer[14:])
-			offset := uint16(shardIndex) - uint16(dataShards) + 1 //计算出偏移量
+			//offset := uint16(shardIndex) - uint16(dataShards) + 1 //计算出偏移量
 			//时间使用的是最后一帧的时间，我们需要计算出正确的时间
 			timestamp := binary.BigEndian.Uint32(buffer[16:])
 			if shardIndex != dataShards-1 { //如果不是最后一个，就需要计算，最后一个直接用
-				sequenceNumber = sequenceNumber + offset //计算当前的包位置
-				timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(offset) * AudioDataTime).UnixMilli())
+				sequenceNumber = sequenceNumber + uint16(shardIndex) //计算当前的包位置
+				timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(shardIndex) * AudioDataTime).UnixMilli())
 			}
 			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber)
-			timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(offset) * AudioDataTime).UnixMilli())
 			binary.BigEndian.PutUint32(buffer[4:], timestamp)
 		default: //其他都是视频 视频数据的rtp包数据都是一样的
 			//sequenceNumber 和 fec info 需要重建

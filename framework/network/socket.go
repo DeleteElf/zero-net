@@ -474,6 +474,10 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 					slog.Any("err", err))
 				return false, err
 			}
+			offset := uint16(config.DataShards) - 1 - uint16(index)
+			baseSequenceNumber := sequenceNumber + 1 - uint16(config.DataShards)
+			baseTimestamp := binary.BigEndian.Uint32(data[4:])
+			baseTimestamp = uint32(time.UnixMilli(int64(baseTimestamp)).Add(time.Duration(-offset) * AudioDataTime).UnixMilli())
 			for i := uint8(0); i < config.ParityShards; i++ { //补发奇偶校验包
 				fecGroup.ParityShards[i][0] = data[0]
 				fecGroup.ParityShards[i][1] = 127
@@ -481,8 +485,9 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				copy(fecGroup.ParityShards[i][4:12], data[4:12])
 				fecGroup.ParityShards[i][12] = i //fecShardIndex
 				fecGroup.ParityShards[i][13] = 97
-				binary.BigEndian.PutUint16(fecGroup.ParityShards[i][14:], sequenceNumber)
-				copy(fecGroup.ParityShards[i][16:24], data[4:12])
+				binary.BigEndian.PutUint16(fecGroup.ParityShards[i][14:], baseSequenceNumber)
+				binary.BigEndian.PutUint32(fecGroup.ParityShards[i][16:], baseTimestamp)
+				copy(fecGroup.ParityShards[i][20:24], data[8:12])
 				_ = s.Conn.SendDatagram(fecGroup.ParityShards[i][:parityShardSize]) //发送处理好的数据
 			}
 		}
@@ -548,8 +553,8 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				copy(buffer[i][:VideoHeaderLength], buffer[0][:VideoHeaderLength]) //拷贝头部数据
 				binary.LittleEndian.PutUint32(buffer[i][28:],
 					uint32(dataShards)<<22|uint32(i)<<12|uint32(idrData)<<11|uint32(fecPercentage)<<4|uint32(channelId)) //FecInfo 增加idr信息、通道信息
-				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))  //SequenceNumber
-				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8) //streamPacketIndex 这个也需要变化
+				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))                                      //SequenceNumber
+				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8)                                     //streamPacketIndex 这个也需要变化
 				buffer[i][16] = packetIndex
 				buffer[i][24] = 0 //这个属性是什么并不重要
 				buffer[i][26] = 0
