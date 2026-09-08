@@ -31,7 +31,7 @@ const (
 	AudioExpireTime    = 100 * time.Millisecond
 	VideoExpireTime    = 100 * time.Millisecond
 	AudioOosExpireTime = 20 * time.Millisecond
-	VideoOosExpireTime = 32 * time.Millisecond
+	VideoOosExpireTime = 50 * time.Millisecond
 	// AudioDataTime 音频数据包的间隔时长
 	AudioDataTime = 10 * time.Millisecond
 )
