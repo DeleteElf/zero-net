@@ -281,7 +281,7 @@ func (s *Socket) InitFecParam(channelId int) error {
 	if config.EnableFec {
 		if config.Type == Audio { //音频大约一个数据包是334大小左右，我们直接塞进一个里面
 			total := config.DataShards + config.ParityShards
-			fecGroup := s.StreamChannels[channelId].FecGroups[0]
+			fecGroup := s.StreamChannels[channelId].Depacketizers[0]
 			fecGroup.SharedShards = make([][]byte, total)
 			fecGroup.ParityShards = make([][]byte, config.ParityShards)
 			for i := uint8(0); i < config.ParityShards; i++ {
@@ -328,7 +328,7 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 				result.Header.ShardIdx = uint8(sequenceNumber % uint16(result.Header.DataShards))
 				result.Header.GroupId = uint8(uint64(sequenceNumber)/uint64(result.Header.DataShards)) + 1
 			}
-			fecGroup := s.StreamChannels[result.Header.ChannelId].FecGroups[0]
+			fecGroup := s.StreamChannels[result.Header.ChannelId].Depacketizers[0]
 			//if fecGroup.NextGroupId == 0 { //这里有一个问题，就是循环使用序号的问题
 			//	fecGroup.NextGroupId = result.Header.GroupId //如果一直没开始，则开始立即使用最新的，丢弃之前的
 			//}
@@ -355,15 +355,15 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 			slog.Debug("无效的ssrc", slog.Any("ssrc", result.Header.Ssrc))
 			return nil
 		}
-		fecGroupMap, exists := s.StreamChannels[result.Header.ChannelId].FecGroups[result.Header.Ssrc]
+		depacketizer, exists := s.StreamChannels[result.Header.ChannelId].Depacketizers[result.Header.Ssrc]
 		if !exists {
-			fecGroupMap = NewFecGroupsMap()
-			s.StreamChannels[result.Header.ChannelId].FecGroups[result.Header.Ssrc] = fecGroupMap
+			depacketizer = NewDepacketizer()
+			s.StreamChannels[result.Header.ChannelId].Depacketizers[result.Header.Ssrc] = depacketizer
 		}
 		result.Header.GroupId = data[16] //  uint64(binary.BigEndian.Uint32(data[16:]))
 		//data[16] = 0                     //	取完数据就还原，其实这个不处理也没事
 		//slog.Debug("step 20", slog.Any("ChannelId", result.Header.ChannelId), slog.Any("Ssrc", result.Header.Ssrc))
-		nextGroupId := fecGroupMap.NextGroupId
+		nextGroupId := depacketizer.NextGroupId
 		if utils.IsBefore8(result.Header.GroupId, nextGroupId) { //已经解码成功的Id就不要了
 			return nil
 		}
@@ -378,9 +378,9 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 					target = int(result.Header.GroupId) + math.MaxUint8
 				}
 				for i := int(nextGroupId); i < target; i++ {
-					delete(fecGroupMap.Groups, uint8(i))
+					delete(depacketizer.Groups, uint8(i))
 				}
-				fecGroupMap.NextGroupId = result.Header.GroupId
+				depacketizer.NextGroupId = result.Header.GroupId
 			}
 		}
 		//	binary.BigEndian.PutUint32(buffer[i][28:], uint32(dataShards<<22|i<<12|idrData<<11|fecPercentage<<4|channelId)) //FecInfo 增加idr信息、通道信息
@@ -447,7 +447,7 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 		//另外，因为是一个一个发的，所以要保留其数据包头
 		sequenceNumber := binary.BigEndian.Uint16(data[2:]) //取出序列号
 		index := uint8(sequenceNumber % uint16(config.DataShards))
-		fecGroup := channel.FecGroups[0]
+		fecGroup := channel.Depacketizers[0]
 		fecGroup.SharedShards[index] = data[RtpHeaderLength:dataSize]
 		if data[0] != RtpHeader {
 			slog.Debug("发送的数据包不是合格的rtp包,audio data")
@@ -459,13 +459,14 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				return false, err
 			}
 			totalShards := config.DataShards + config.ParityShards
+			parityShardSize := dataSize + 12
 			for i := config.DataShards; i < totalShards; i++ { //补发奇偶校验包
-				if fecGroup.SharedShards[i] == nil || cap(fecGroup.SharedShards[i]) != dataSize {
-					fecGroup.SharedShards[i] = fecGroup.ParityShards[i-config.DataShards][AudioHeaderLength : dataSize+12]
+				if fecGroup.SharedShards[i] == nil || cap(fecGroup.SharedShards[i]) != parityShardSize {
+					fecGroup.SharedShards[i] = fecGroup.ParityShards[i-config.DataShards][AudioHeaderLength:parityShardSize]
 				}
 				clear(fecGroup.SharedShards[i]) //清除数据防止脏读
 			}
-			err = encoder.Encode(fecGroup.SharedShards)
+			err = encoder.Encode(fecGroup.SharedShards) //生成fec结果
 			if err != nil {
 				slog.Debug("编码fec过程发生错误", slog.Int("channelId", channelId),
 					slog.Any("sequenceNumber", sequenceNumber), slog.Int("length", len(fecGroup.SharedShards)),
@@ -482,7 +483,7 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				fecGroup.ParityShards[i][13] = 97
 				binary.BigEndian.PutUint16(fecGroup.ParityShards[i][14:], sequenceNumber)
 				copy(fecGroup.ParityShards[i][16:24], data[4:12])
-				_ = s.Conn.SendDatagram(fecGroup.ParityShards[i][:dataSize]) //发送处理好的数据
+				_ = s.Conn.SendDatagram(fecGroup.ParityShards[i][:parityShardSize]) //发送处理好的数据
 			}
 		}
 	case Video: //支持媒体流传输的特殊协议
@@ -547,8 +548,8 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				copy(buffer[i][:VideoHeaderLength], buffer[0][:VideoHeaderLength]) //拷贝头部数据
 				binary.LittleEndian.PutUint32(buffer[i][28:],
 					uint32(dataShards)<<22|uint32(i)<<12|uint32(idrData)<<11|uint32(fecPercentage)<<4|uint32(channelId)) //FecInfo 增加idr信息、通道信息
-				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))                                      //SequenceNumber
-				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8)                                     //streamPacketIndex 这个也需要变化
+				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))  //SequenceNumber
+				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8) //streamPacketIndex 这个也需要变化
 				buffer[i][16] = packetIndex
 				buffer[i][24] = 0 //这个属性是什么并不重要
 				buffer[i][26] = 0
@@ -578,7 +579,7 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 			_ = s.Conn.SendDatagram(shard) //发送处理好的数据
 		}
 	default: //数据分割模式
-		frameIndex := atomic.AddUint64(&channel.FecGroups[0].FrameIndex, 1)
+		frameIndex := atomic.AddUint64(&channel.Depacketizers[0].FrameIndex, 1)
 		cfg := s.StreamConfigs[channelId]
 		maxPayloadSize := int(cfg.FecPacketSize - FecPacketHeaderLength)
 		targetDataShards := uint8(utils.Ceil(dataSize, maxPayloadSize))

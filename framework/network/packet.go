@@ -29,12 +29,13 @@ const (
 	MessageExpireTime  = 200 * time.Millisecond
 	AudioExpireTime    = 100 * time.Millisecond
 	VideoExpireTime    = 100 * time.Millisecond
-	AudioOosExpireTime = 10 * time.Millisecond
-	// AudioDataTime 音频数据包的时长
+	AudioOosExpireTime = 20 * time.Millisecond
+	VideoOosExpireTime = 32 * time.Millisecond
+	// AudioDataTime 音频数据包的间隔时长
 	AudioDataTime = 10 * time.Millisecond
 )
 
-type FecGroupsMap struct {
+type Depacketizer struct {
 	Groups      map[uint8]*FecGroup //仅用于解码
 	NextGroupId uint8               //仅用于解码
 	FrameIndex  uint64              //仅用于编码
@@ -44,8 +45,8 @@ type FecGroupsMap struct {
 	ParityShards [][]byte
 }
 
-func NewFecGroupsMap() *FecGroupsMap {
-	return &FecGroupsMap{
+func NewDepacketizer() *Depacketizer {
+	return &Depacketizer{
 		Groups:      make(map[uint8]*FecGroup),
 		NextGroupId: 1,
 		FrameIndex:  0,
@@ -59,6 +60,7 @@ type FecGroup struct {
 	Shards          [][]byte // 槽位数组，长度为 DataShards + ParityShards
 	Packets         []*FecPacket
 	Received        uint8     // 当前已收到的有效分片数
+	HasParityShard  bool      //是否包含奇偶校验分片
 	ExpiredAt       time.Time //预期销毁时间
 	OosTime         time.Time //当前分组的首个数据包到达时间
 	ShardCount      uint8     //当前分组的数据分片数量
@@ -164,13 +166,22 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 		switch header[1] {
 		case 0x61: //标准音频
 			sequenceNumber := binary.BigEndian.Uint16(buffer[2:])
-			sequenceNumber = sequenceNumber - sequenceNumber%uint16(dataShards) + uint16(shardIndex) //计算当前的包位置
+			offset := uint16(shardIndex) - sequenceNumber%uint16(dataShards)
+			sequenceNumber = sequenceNumber + offset //计算当前的包位置
 			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber)
+			//声音每帧都偏移了一个 AudioDataTime,通过偏移量修正
+			timestamp := binary.BigEndian.Uint32(buffer[4:])
+			timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(offset) * AudioDataTime).UnixMilli())
+			binary.BigEndian.PutUint32(buffer[4:], timestamp)
 		case 0x7f: //动态音频
 			baseSequenceNumber := binary.BigEndian.Uint16(buffer[14:])
 			sequenceNumber := baseSequenceNumber - uint16(dataShards) + 1 + uint16(shardIndex) //计算当前的包位置
 			buffer[1] = 0x61                                                                   //通过动态音频获取的 packetType为127，我们需要修改成97
 			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber)
+			//时间使用的是最后一帧的时间，我们需要计算出正确的时间
+			timestamp := binary.BigEndian.Uint32(buffer[16:])
+			timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(shardIndex-dataShards) * AudioDataTime).UnixMilli())
+			binary.BigEndian.PutUint32(buffer[4:], timestamp)
 		default: //其他都是视频 视频数据的rtp包数据都是一样的
 			//sequenceNumber 和 fec info 需要重建
 		}
