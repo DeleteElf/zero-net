@@ -474,8 +474,8 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 					slog.Any("err", err))
 				return false, err
 			}
-			offset := uint16(config.DataShards) - 1 - uint16(index)
-			baseSequenceNumber := sequenceNumber + 1 - uint16(config.DataShards)
+			offset := uint16(config.DataShards - 1)
+			baseSequenceNumber := sequenceNumber - offset
 			baseTimestamp := binary.BigEndian.Uint32(data[4:])
 			baseTimestamp = uint32(time.UnixMilli(int64(baseTimestamp)).Add(time.Duration(-offset) * AudioDataTime).UnixMilli())
 			for i := uint8(0); i < config.ParityShards; i++ { //补发奇偶校验包
