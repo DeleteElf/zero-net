@@ -335,12 +335,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			// 关键优化：使用 ReconstructData 仅恢复数据分片，比 Reconstruct 省时省 CPU
 			encoder, err := sc.GetFecEncoder(header.DataShards, header.ParityShards)
 			if err != nil {
-				delete(g.Groups, g.NextGroupId)
-				g.NextGroupId++
 				return fmt.Errorf("获取fec解码器出错【%d】: %w", header.GroupId, err)
-				//if sc.CheckDataReceiveTimeout(next, g) {
-				//	continue
-				//}
 			}
 			err = encoder.ReconstructData(next.Shards)
 			if err != nil {
@@ -353,7 +348,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 				g.NextGroupId++
 				return fmt.Errorf("fec解码出错【%d】:  %w", header.GroupId, err)
 			}
-			slog.Debug("执行Fec解码逻辑", slog.Any("groupId", header.GroupId))
+			//slog.Debug("执行Fec解码逻辑", slog.Any("groupId", header.GroupId))
 		}
 		//slog.Debug("解码fec完成", slog.Int("groupId", int(next.GroupID)))
 		delete(g.Groups, header.GroupId)
