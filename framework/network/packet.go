@@ -179,7 +179,7 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 			offset := uint16(shardIndex) - uint16(dataShards) + 1 //计算出偏移量
 			//时间使用的是最后一帧的时间，我们需要计算出正确的时间
 			timestamp := binary.BigEndian.Uint32(buffer[16:])
-			if shardIndex != dataShards-1 {
+			if shardIndex != dataShards-1 { //如果不是最后一个，就需要计算，最后一个直接用
 				sequenceNumber = sequenceNumber + offset //计算当前的包位置
 				timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(offset) * AudioDataTime).UnixMilli())
 			}
