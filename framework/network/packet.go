@@ -3,6 +3,7 @@ package network
 import (
 	"encoding/binary"
 	"errors"
+	"log/slog"
 	"time"
 )
 
@@ -168,10 +169,13 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 			sequenceNumber := binary.BigEndian.Uint16(buffer[2:])
 			offset := uint16(shardIndex) - sequenceNumber%uint16(dataShards)
 			sequenceNumber = sequenceNumber + offset
-			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber) //计算当前的包位置
 			//声音每帧都偏移了一个 AudioDataTime,通过偏移量修正
 			timestamp := binary.BigEndian.Uint32(buffer[4:])
 			timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(offset) * AudioDataTime).UnixMilli())
+			if timestamp != uint32(sequenceNumber)*10 {
+				slog.Debug("重建rtp数据包，时间验证错误！", slog.Any("seq", sequenceNumber), slog.Any("timestamp", timestamp))
+			}
+			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber) //计算当前的包位置
 			binary.BigEndian.PutUint32(buffer[4:], timestamp)
 		case 0x7f: //动态音频
 			buffer[1] = 0x61 //通过动态音频获取的 packetType为127，我们需要修改成97
@@ -182,6 +186,9 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 			if shardIndex != dataShards-1 { //如果不是最后一个，就需要计算，最后一个直接用
 				sequenceNumber = sequenceNumber + uint16(shardIndex) //计算当前的包位置
 				timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(shardIndex) * AudioDataTime).UnixMilli())
+			}
+			if timestamp != uint32(sequenceNumber)*10 {
+				slog.Debug("时间验证错误！", slog.Any("seq", sequenceNumber), slog.Any("timestamp", timestamp))
 			}
 			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber)
 			binary.BigEndian.PutUint32(buffer[4:], timestamp)

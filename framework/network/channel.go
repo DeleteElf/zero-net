@@ -194,6 +194,20 @@ func (sc *StreamChannel) CheckDataReceiveTimeout(group *FecGroup, groups *Depack
 				slog.Debug("音频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
 					slog.Any("groupId", groups.NextGroupId), slog.Any("已接收", group.Received),
 					slog.Any("合计", len(group.Shards)))
+				//todo:这里需要补充一下数据并告诉上层逻辑
+				for i := 0; i < int(group.ShardCount); i++ {
+					if sc.Channel != nil {
+						if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
+							group.Shards[i] = make([]byte, 0)
+						}
+						sc.Channel <- StreamChannelData{
+							ClientId:  sc.ClientId,
+							ChannelId: sc.ChannelId,
+							Offset:    0,
+							Data:      group.Shards[i], //直接使用原始数据包，实现零拷贝
+						}
+					}
+				}
 				delete(groups.Groups, groups.NextGroupId)
 				groups.NextGroupId++ // 单协程处理下无需 atomic，若多协程则整体加锁
 				return true
@@ -355,23 +369,34 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			isVideo := next.HeaderTemplate[1] != 0x61 && next.HeaderTemplate[1] != 0x7f
 			//slog.Debug("fec开始重组", slog.Any("channel id", sc.ChannelId), slog.Any("groupId", header.GroupId))
 			for i := 0; i < int(header.DataShards); i++ {
-				var resultData []byte
-				if next.Packets[i] == nil { //Payload 是携带rtp包头信息的完整数据缓存
-					resultData = RebuildRtpPacket(next.HeaderTemplate, next.Shards[i], uint8(i), header.DataShards)
-				} else { //清除fecPercentage的数据
-					resultData = next.Packets[i].Payload //直接使用原始数据包，实现零拷贝
-				}
-				if isVideo { //因为我们已经处理过fec了，必须告诉上层没有fec分片数据了
-					oldFecInfo := binary.LittleEndian.Uint32(resultData[28:])
-					binary.LittleEndian.PutUint32(resultData[28:32], oldFecInfo&^(0x7F<<4))
-				}
-				//slog.Debug("fec重组了一条数据", slog.Any("channel id", sc.ChannelId), slog.Any("shard index", i))
-				if sc.Channel != nil {
-					sc.Channel <- StreamChannelData{
-						ClientId:  sc.ClientId,
-						ChannelId: sc.ChannelId,
-						Offset:    0,
-						Data:      resultData, //直接使用原始数据包，实现零拷贝
+				if !isVideo { //先只修改音频支持
+					if sc.Channel != nil {
+						sc.Channel <- StreamChannelData{
+							ClientId:  sc.ClientId,
+							ChannelId: sc.ChannelId,
+							Offset:    0,
+							Data:      next.Shards[i], //直接使用原始数据包，实现零拷贝
+						}
+					}
+				} else {
+					var resultData []byte
+					if next.Packets[i] == nil { //Payload 是携带rtp包头信息的完整数据缓存
+						resultData = RebuildRtpPacket(next.HeaderTemplate, next.Shards[i], uint8(i), header.DataShards)
+					} else { //清除fecPercentage的数据
+						resultData = next.Packets[i].Payload //直接使用原始数据包，实现零拷贝
+					}
+					if isVideo { //因为我们已经处理过fec了，必须告诉上层没有fec分片数据了
+						oldFecInfo := binary.LittleEndian.Uint32(resultData[28:])
+						binary.LittleEndian.PutUint32(resultData[28:32], oldFecInfo&^(0x7F<<4))
+					}
+					//slog.Debug("fec重组了一条数据", slog.Any("channel id", sc.ChannelId), slog.Any("shard index", i))
+					if sc.Channel != nil {
+						sc.Channel <- StreamChannelData{
+							ClientId:  sc.ClientId,
+							ChannelId: sc.ChannelId,
+							Offset:    0,
+							Data:      resultData, //直接使用原始数据包，实现零拷贝
+						}
 					}
 				}
 			}
