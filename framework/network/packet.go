@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	FecPacketHeaderLength    = 32
-	FecLimitPacketSize       = 100
+	FecPacketHeaderLength = 32
+	// FecLimitPacketSize 我们传输音频包 48000质量的 opus 最小是60+12的rtp数据包，因此默认限制一下70
+	FecLimitPacketSize       = 70
 	NetMtuPacketSize         = 1400
 	VideoHeaderLength        = 32
 	AudioHeaderLength        = 24

@@ -140,6 +140,7 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	}
 	socketConnectedCallback := func(sock *network.Socket) {
 		if clientCtx.SupportFec {
+			//slog.Debug("客户端提供Fec支持！")
 			for i := 0; i < sock.ChannelCount; i++ {
 				sock.StreamConfigs[i].SetStreamType(network.StreamType(i)) //设置通道媒体类型
 				sock.StreamConfigs[i].FecPacketSize = clientCtx.FecBlockSize

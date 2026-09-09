@@ -366,6 +366,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			for i := 0; i < int(header.DataShards); i++ {
 				if !isVideo { //先只修改音频支持
 					if sc.Channel != nil {
+						//slog.Debug("执行音频直接接收并解码", slog.Int("size", len(next.Shards[i])))
 						sc.Channel <- StreamChannelData{
 							ClientId:  sc.ClientId,
 							ChannelId: sc.ChannelId,
