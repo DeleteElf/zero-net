@@ -198,7 +198,7 @@ func (sc *StreamChannel) CheckDataReceiveTimeout(group *FecGroup, groups *Depack
 				for i := 0; i < int(group.ShardCount); i++ {
 					if sc.Channel != nil {
 						if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-							group.Shards[i] = make([]byte, 0)
+							group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
 						}
 						sc.Channel <- StreamChannelData{
 							ClientId:  sc.ClientId,
