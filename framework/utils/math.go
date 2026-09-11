@@ -29,3 +29,13 @@ func IsBefore8(a, b uint8) bool {
 func IsBefore16(a, b uint16) bool {
 	return IsBefore(a, b, math.MaxUint16)
 }
+
+// IsBefore32 判断a是否比b小，支持数据溢出后的计算
+func IsBefore32(a, b uint32) bool {
+	return IsBefore(a, b, math.MaxUint32)
+}
+
+// IsBefore64 判断a是否比b小，支持数据溢出后的计算
+func IsBefore64(a, b uint64) bool {
+	return IsBefore(a, b, math.MaxUint64)
+}

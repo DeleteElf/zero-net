@@ -139,7 +139,7 @@ func fecMessageHandler(sock *network.Socket, channelIndex int) {
 				data := []byte(temp)
 				slog.Debug("正在向客户端发送fec数据包", slog.Int("channelId", currentBuffer.ChannelId),
 					slog.Int("数据长度:", len(data)), slog.String("msg", temp))
-				//sock.StreamChannels[channelIndex].Depacketizers[0].FrameIndex = uint64(index)
+				//sock.StreamChannels[channelIndex].Depacketizers[0].CurrentFrameIndex = uint64(index)
 				_, err = sock.Send(channelIndex, data)
 				if err != nil {
 					return
@@ -153,7 +153,7 @@ func fecMessageHandler(sock *network.Socket, channelIndex int) {
 				//if svr.QuicConfig.EnableDatagrams {
 				//	_, err = sock.SendFecDatagram(channelIndex, uint64(i+10), false, data) //这里我们模拟强制乱序，接收重组
 				//} else {
-				//sock.StreamChannels[channelIndex].Depacketizers[0].FrameIndex = uint64(i + count)
+				//sock.StreamChannels[channelIndex].Depacketizers[0].CurrentFrameIndex = uint64(i + count)
 				_, err = sock.Send(channelIndex, data)
 				//}
 				if err != nil {

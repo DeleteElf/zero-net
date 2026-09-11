@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	FecPacketHeaderLength = 32
+	FecPacketHeaderLength = 26
 	// FecLimitPacketSize 我们传输音频包 48000质量的 opus 最小是60+12的rtp数据包，因此默认限制一下70
 	FecLimitPacketSize       = 70
 	NetMtuPacketSize         = 1400
@@ -31,27 +31,62 @@ const (
 	MessageExpireTime  = 200 * time.Millisecond
 	AudioExpireTime    = 100 * time.Millisecond
 	VideoExpireTime    = 100 * time.Millisecond
-	AudioOosExpireTime = 20 * time.Millisecond
-	VideoOosExpireTime = 50 * time.Millisecond
+	AudioOosExpireTime = 100 * time.Millisecond
+	VideoOosExpireTime = 500 * time.Millisecond
 	// AudioDataTime 音频数据包的间隔时长
 	AudioDataTime = 10 * time.Millisecond
+
+	SPECULATIVE_RFI_COOLDOWN_PERIOD_US = 300000000
 )
 
+type FrameLostControlPacket struct {
+	TrackIndex int
+	StartFrame uint32
+	EndFrame   uint32
+	Invalidate byte // true: RFI(startFrame, endFrame); false: LTR_ACK(startFrame)
+}
+
+// Packetizer 打包器
+type Packetizer struct {
+	FrameIndex  uint32
+	BlockIndex  uint8
+	GroupIndex  uint8
+	PacketIndex uint8
+}
+
+func NewPacketizer() *Packetizer {
+	return &Packetizer{}
+}
+
+// Depacketizer 解包器
 type Depacketizer struct {
-	Groups      map[uint8]*FecGroup //仅用于解码
-	NextGroupId uint8               //仅用于解码
-	FrameIndex  uint64              //仅用于编码
+	Groups            map[uint8]*FecGroup
+	CurrentFrameIndex uint32
+	CurrentBlockIndex uint8
+	CurrentGroupId    uint8
+	//下一帧的序列
+	NextSequenceNumber uint16
 	//仅用于静态解码
 	SharedShards [][]byte
 	//仅用于静态解码
 	ParityShards [][]byte
+	// 是否正在等待下个关键帧
+	WaitingForIdrFrame bool
+	// 开始帧索引
+	//StartFrameIndex uint32
+	// 是否已经报告丢帧
+	ReportedLostFrame bool
+	//丢包数量
+	MissingPackets uint16
+	//是否收到Oos数据
+	ReceivedOosData                   bool
+	LastOosFramePresentationTimestamp uint64
 }
 
 func NewDepacketizer() *Depacketizer {
 	return &Depacketizer{
-		Groups:      make(map[uint8]*FecGroup),
-		NextGroupId: 1,
-		FrameIndex:  0,
+		Groups:         make(map[uint8]*FecGroup),
+		CurrentGroupId: 1,
 	}
 }
 
@@ -79,26 +114,30 @@ type FecPacketHeader struct {
 	ChannelId uint8
 	//同步源id
 	Ssrc uint8
-	//是否关键帧，如果不是关键帧，则只能依赖超时来跳过
+	//索引，如果涉及多分块，则存在一帧内，多个group id,起始位置4
+	FrameIndex uint32
+	//序列，起始位置8
+	SequenceNumber uint16
+	//是否关键帧，如果不是关键帧，则只能依赖超时来跳过，起始位置10
 	Idr uint8
-	//shard的索引 1个字节
+	//总分块数
+	BlockCount uint8
+	//分块索引,默认为0 起始位置11
+	BlockIdx uint8
+	//分组的编号，主要用于重组，8个字节，考虑到可能会播放很久,GroupId并不等于FrameIndex，一个数据包可能被拆成多个分组,起始位置12
+	GroupIdx uint8
+	//shard的索引 1个字节 起始位置13
 	ShardIdx uint8
-	//核心数据分片数
+	//核心数据分片数 起始位置14
 	DataShards uint8
-	//fec矩阵分片数
+	//fec矩阵分片数 起始位置15
 	ParityShards uint8
-	//如果涉及多分块，则存在一帧内，多个group id,起始位置4
-	FrameId uint64
-	//数据包时间,起始位置6
-	Timestamp uint64
-	//数据总长度,起始位置26
+	//数据包时间,起始位置16
+	Timestamp uint32
+	//数据总长度,起始位置20
 	Total uint32
-	//数据包体长度 2个字节,起始位置30
+	//数据包体长度 2个字节,起始位置24
 	Length uint16
-	//分组的编号，主要用于重组，8个字节，考虑到可能会播放很久,GroupId并不等于FrameIndex，一个数据包可能被拆成多个分组,起始位置14
-	GroupId uint8
-	//预留
-	Unknown uint8
 }
 
 type FecPacket struct {
@@ -269,9 +308,9 @@ var RtpPacketTooShort = errors.New("数据包长度不足，转换失败")
 //		h.Type = data[1]
 //		h.ChannelId = data[2]
 //		h.Ssrc = data[3]
-//		h.FrameId = binary.BigEndian.Uint16(data[4:6])
+//		h.CurrentFrameIndex = binary.BigEndian.Uint16(data[4:6])
 //		h.Timestamp = binary.BigEndian.Uint64(data[6:14])
-//		h.GroupId = binary.BigEndian.Uint64(data[14:22])
+//		h.GroupIdx = binary.BigEndian.Uint64(data[14:22])
 //		h.Idr = data[22]
 //		h.ShardIdx = data[23]
 //		h.DataShards = data[24]
@@ -298,7 +337,7 @@ var RtpPacketTooShort = errors.New("数据包长度不足，转换失败")
 //				Reserved: [4]byte{data[12], data[13], data[14], data[15]},
 //				Packet: NvidiaVideoPacket{
 //					StreamPacketIndex: binary.LittleEndian.Uint32(data[16:20]),
-//					FrameIndex:        binary.BigEndian.Uint32(data[20:24]),
+//					CurrentFrameIndex:        binary.BigEndian.Uint32(data[20:24]),
 //					Flags:             data[24],
 //					ExtraFlags:        data[25],
 //					MultiFecFlags:     data[26],
@@ -347,7 +386,7 @@ var RtpPacketTooShort = errors.New("数据包长度不足，转换失败")
 //
 //	// 3. NV_VIDEO_PACKET 解析
 //	packet.Header.Packet.StreamPacketIndex = binary.BigEndian.Uint32(data[16:20])
-//	packet.Header.Packet.FrameIndex = binary.BigEndian.Uint32(data[20:24])
+//	packet.Header.Packet.CurrentFrameIndex = binary.BigEndian.Uint32(data[20:24])
 //	packet.Header.Packet.Flags = data[24]
 //	packet.Header.Packet.ExtraFlags = data[25]
 //	packet.Header.Packet.MultiFecFlags = data[26]
@@ -379,7 +418,7 @@ var RtpPacketTooShort = errors.New("数据包长度不足，转换失败")
 //	buffer[14] = packet.Header.Reserved[2]
 //	buffer[15] = packet.Header.Reserved[3]
 //	binary.BigEndian.PutUint32(buffer[16:20], packet.Header.Packet.StreamPacketIndex)
-//	binary.BigEndian.PutUint32(buffer[20:24], packet.Header.Packet.FrameIndex)
+//	binary.BigEndian.PutUint32(buffer[20:24], packet.Header.Packet.CurrentFrameIndex)
 //	buffer[24] = packet.Header.Packet.Flags
 //	buffer[25] = packet.Header.Packet.ExtraFlags
 //	buffer[26] = packet.Header.Packet.MultiFecFlags

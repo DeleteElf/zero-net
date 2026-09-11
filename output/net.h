@@ -26,6 +26,7 @@ enum LogLevel {
 //声明消息回调
 typedef void (*MessageCallback)(const char*);
 typedef void (*MessageChannelCallback)(const char*,int);
+typedef void (*FrameLostCallback)(int,int,int);
 
 typedef struct _NetworkData {
     int len;
@@ -63,6 +64,12 @@ static void callMessageCallback(MessageCallback callback,const char* msg){
 static void callMessageChannelCallback(MessageChannelCallback callback,const char* msg,int channelId){
 	if(callback){
 		callback(msg,channelId);
+	}
+}
+
+static void callFrameLostCallback(FrameLostCallback callback,int ssrc,int start,int end){
+	if(callback){
+		callback(ssrc,start,end);
 	}
 }
 
@@ -121,6 +128,7 @@ int InitNetwork(void);
 
 int SetOnAcceptSocketCallback(MessageCallback callback);
 int SetOnDisConnectedCallback(MessageCallback callback);
+int SetOnFrameLostCallback(FrameLostCallback callback);
 
 int ClientClose(void);
 int ClientConnect(int channelCount, NetworkData* config);

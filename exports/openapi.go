@@ -110,13 +110,34 @@ func SetOnDisConnectedCallback(callback C.MessageCallback) C.int {
 	return C.Success
 }
 
+//export SetOnFrameLostCallback
+func SetOnFrameLostCallback(callback C.FrameLostCallback) C.int {
+	if clientCtx == nil {
+		slog.Warn("请先创建客户端实例！")
+		return C.ErrorContext
+	}
+	if clientCtx.Socket == nil {
+		slog.Warn("客户端未建立连接！")
+		return C.ErrorContext
+	}
+	for i, channel := range clientCtx.Socket.StreamChannels {
+		if clientCtx.Socket.StreamConfigs[i].EnableFec && clientCtx.Socket.StreamConfigs[i].Type == network.Video {
+			slog.Debug("注册帧丢失事件！")
+			channel.OnFrameLost = func(ssrc uint8, startFrameIndex uint32, endFrameIndex uint32) {
+				C.callFrameLostCallback(callback, C.int(ssrc), C.int(startFrameIndex), C.int(endFrameIndex))
+			}
+		}
+	}
+	return C.Success
+}
+
 //export ClientClose
 func ClientClose() C.int {
 	if clientCtx == nil {
 		//slog.Warn("未检索到有效的客户端！")
 		return C.ErrorContext
 	}
-	clientCtx.Close()
+	_ = clientCtx.Close()
 	clientCtx = nil
 	return C.Success
 }

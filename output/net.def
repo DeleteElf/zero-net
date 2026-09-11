@@ -5,7 +5,8 @@ EXPORTS
 
     SetOnAcceptSocketCallback
     SetOnDisConnectedCallback
-
+    SetOnFrameLostCallback
+    
     ClientClose
     ClientConnect
     ClientChannelReceive
