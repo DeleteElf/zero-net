@@ -12,6 +12,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"io"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 )
@@ -434,30 +435,32 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 					tempGroup := depacketizer.Groups[packet.Header.GroupIdx]
 					if tempGroup.Received >= tempGroup.ShardCount { //新的已经接收满了
 						//todo:这里可能需要补充空洞数据,如果不补，应该也可以，从时间维度来说，无形中，还能追帧，从效果来说，可能出现音爆
-						//target := uint16(packet.Header.GroupIdx)
-						//if packet.Header.GroupIdx < depacketizer.CurrentGroupId {
-						//	target += math.MaxUint8
-						//}
-						//for i := uint16(depacketizer.CurrentGroupId); i < target; i++ {
-						//	group, exists := depacketizer.Groups[uint8(i)]
-						//	if exists {
-						//		for i := 0; i < int(group.ShardCount); i++ {
-						//			if sc.Channel != nil {
-						//				if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-						//					group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
-						//				}
-						//				sc.Channel <- StreamChannelData{
-						//					ClientId:  sc.ClientId,
-						//					ChannelId: sc.ChannelId,
-						//					Offset:    0,
-						//					Data:      group.Shards[i], //直接使用原始数据包，实现零拷贝
-						//				}
-						//			}
-						//		}
-						//	} else {
-						//		continue
-						//	}
-						//}
+						target := uint16(packet.Header.GroupIdx)
+						if packet.Header.GroupIdx < depacketizer.CurrentGroupId {
+							target += math.MaxUint8
+						}
+						for i := uint16(depacketizer.CurrentGroupId); i < target; i++ {
+							delete(depacketizer.Groups, uint8(i)) //清空缓存
+							//group, exists := depacketizer.Groups[uint8(i)]
+							//if exists {
+							//	delete(depacketizer.Groups, uint8(i)) //清空缓存
+							//	for i := 0; i < int(group.ShardCount); i++ {
+							//		if sc.Channel != nil {
+							//			if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
+							//				group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
+							//			}
+							//			sc.Channel <- StreamChannelData{
+							//				ClientId:  sc.ClientId,
+							//				ChannelId: sc.ChannelId,
+							//				Offset:    0,
+							//				Data:      group.Shards[i], //直接使用原始数据包，实现零拷贝
+							//			}
+							//		}
+							//	}
+							//} else {
+							//	continue
+							//}
+						}
 						slog.Debug("新的音频数据已经满足解码，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
 						depacketizer.CurrentGroupId = packet.Header.GroupIdx //直接跳到当前，旧的全部舍弃
 						continue
