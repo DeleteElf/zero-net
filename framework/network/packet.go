@@ -46,64 +46,6 @@ type FrameLostControlPacket struct {
 	Invalidate byte // true: RFI(startFrame, endFrame); false: LTR_ACK(startFrame)
 }
 
-// Packetizer 打包器
-type Packetizer struct {
-	FrameIndex  uint32
-	BlockIndex  uint8
-	GroupIndex  uint8
-	PacketIndex uint8
-}
-
-func NewPacketizer() *Packetizer {
-	return &Packetizer{}
-}
-
-// Depacketizer 解包器
-type Depacketizer struct {
-	Groups            map[uint8]*FecGroup
-	CurrentFrameIndex uint32
-	CurrentBlockIndex uint8
-	CurrentGroupId    uint8
-	//下一帧的序列
-	NextSequenceNumber uint16
-	//仅用于静态解码
-	SharedShards [][]byte
-	//仅用于静态解码
-	ParityShards [][]byte
-	// 是否正在等待下个关键帧
-	WaitingForIdrFrame bool
-	// 开始帧索引
-	//StartFrameIndex uint32
-	// 是否已经报告丢帧
-	ReportedLostFrame bool
-	//丢包数量
-	MissingPackets uint16
-	//是否收到Oos数据
-	ReceivedOosData                   bool
-	LastOosFramePresentationTimestamp uint64
-}
-
-func NewDepacketizer() *Depacketizer {
-	return &Depacketizer{
-		Groups:         make(map[uint8]*FecGroup),
-		CurrentGroupId: 1,
-	}
-}
-
-// FecGroup 用于收集和组装同一 GroupID 的分片
-type FecGroup struct {
-	HeaderSample    *FecPacketHeader
-	HeaderTemplate  []byte
-	Shards          [][]byte // 槽位数组，长度为 DataShards + ParityShards
-	Packets         []*FecPacket
-	Received        uint8     // 当前已收到的有效分片数
-	HasParityShard  bool      //是否包含奇偶校验分片
-	ExpiredAt       time.Time //预期销毁时间
-	OosTime         time.Time //当前分组的首个数据包到达时间
-	ShardCount      uint8     //当前分组的数据分片数量
-	ShardDataLength uint16
-}
-
 // FecPacketHeader 自定义分Fec数据包
 type FecPacketHeader struct {
 	//数据头类型
@@ -189,11 +131,11 @@ type AudioFecPacket struct {
 	Payload   []byte
 }
 
-// RebuildRtpPacket 通过fec解码后的数据重建rtp数据包
+// RebuildRtpPacket 通过fec解包后的数据重建rtp数据包
 //
 //   - param buffer 通过缓存池建立的数据缓存
 //   - param header 同个fec分组的其他数据头，用于样本恢复
-//   - param data fec解码后生成的顺序数据包，仅包含数据部分
+//   - param data fec解包后生成的顺序数据包，仅包含数据部分
 //   - param shardIndex	当前需要重建的数据包所在的分片索引
 //   - param dataShards	当前分组的数据分片总数
 //

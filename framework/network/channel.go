@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/DeleteElf/zero-net/framework"
 	"github.com/DeleteElf/zero-net/framework/utils"
-	"github.com/klauspost/reedsolomon"
 	"github.com/quic-go/quic-go"
 	"io"
 	"log/slog"
@@ -42,10 +41,8 @@ type StreamChannel struct {
 	Done          bool
 	Buffer        *StreamChannelData
 	Stream        *quic.Stream
-	FecEncoders   map[string]reedsolomon.Encoder
 	Depacketizers map[uint8]*Depacketizer
 	Packetizers   map[uint8]*Packetizer
-	lockEncoders  sync.Mutex
 	lockFecGroups sync.Mutex
 
 	OnConnect    MessageChannelCallbackFunc
@@ -73,12 +70,12 @@ func NewStreamChannel(id string, index int) *StreamChannel {
 		ChannelId:     index,
 		Depacketizers: make(map[uint8]*Depacketizer), //初始化空的解包器
 		Packetizers:   make(map[uint8]*Packetizer),   //初始化空的打包器
-		FecEncoders:   make(map[string]reedsolomon.Encoder),
 		CloseableObject: framework.CloseableObject{
 			IsClosed: false,
 		},
 	}
-	sc.Depacketizers[0] = NewDepacketizer() //初始化一个组
+	sc.Depacketizers[0] = NewDepacketizer() //初始化一个解包器
+	sc.Packetizers[0] = NewPacketizer()     //初始化一个打包器
 	sc.SetOnCloseHandler(sc)
 	return sc
 }
@@ -154,15 +151,7 @@ func (sc *StreamChannel) HandleChannelStreamData(stream *quic.Stream) {
 		if sc == nil {
 			return
 		}
-		if sc.Channel == nil {
-			return
-		}
-		sc.Channel <- StreamChannelData{
-			ClientId:  sc.ClientId,
-			ChannelId: sc.ChannelId,
-			Offset:    0,
-			Data:      buf,
-		}
+		sc.handleDataToChannel(buf)
 	}
 }
 
@@ -187,151 +176,6 @@ func (sc *StreamChannel) Send(data []byte) (bool, error) {
 	}
 	err := utils.WriteStreamByHeaderUShort(sc.Stream, data)
 	return err == nil, err
-}
-
-func (sc *StreamChannel) CheckDataReceiveTimeout(group *FecGroup, groups *Depacketizer) bool {
-	if group.ExpiredAt.Before(time.Now()) { //如果已经过期，则不再等待，直接接收下一个
-		if group.HeaderTemplate[0] == RtpHeader && //音频数据是陆续发送的，我们允许按时间递增等待
-			(group.HeaderTemplate[1] == AudioHeader || group.HeaderTemplate[1] == AudioDynamicHeader) {
-			//expireTime := group.OosTime.Add(AudioOosExpireTime + time.Duration(group.ShardCount-1)*AudioDataTime)
-			//if expireTime.Before(time.Now()) {
-			//	slog.Debug("音频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
-			//		slog.Any("groupId", groups.CurrentGroupId), slog.Any("已接收", group.Received),
-			//		slog.Any("合计", len(group.Shards)))
-			//todo:这里需要补充一下数据并告诉上层逻辑
-			for i := 0; i < int(group.ShardCount); i++ {
-				if sc.Channel != nil {
-					if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-						group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
-					}
-					sc.Channel <- StreamChannelData{
-						ClientId:  sc.ClientId,
-						ChannelId: sc.ChannelId,
-						Offset:    0,
-						Data:      group.Shards[i], //直接使用原始数据包，实现零拷贝
-					}
-				}
-			}
-			//	delete(groups.Groups, groups.CurrentGroupId)
-			//	groups.CurrentGroupId++ // 单协程处理下无需 atomic，若多协程则整体加锁
-			//	return true
-			//}
-			//return false
-		} else if group.HeaderTemplate[0] == VideoHeader { //如果是我们的视频包
-			//expireTime := group.OosTime.Add(VideoOosExpireTime)
-			//if expireTime.Before(time.Now()) {
-			//	slog.Debug("视频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
-			//		slog.Any("groupId", groups.CurrentGroupId), slog.Any("已接收", group.Received),
-			//		slog.Any("合计", len(group.Shards)))
-			//	delete(groups.Groups, groups.CurrentGroupId)
-			//	groups.CurrentGroupId++ // 单协程处理下无需 atomic，若多协程则整体加锁
-			//	return true
-			//}
-			return false //如果没有超过
-		}
-		slog.Debug("帧接收超时丢弃！", slog.Int("channel", sc.ChannelId),
-			slog.Any("groupId", groups.CurrentGroupId), slog.Any("已接收", group.Received),
-			slog.Any("合计", len(group.Shards)))
-		delete(groups.Groups, groups.CurrentGroupId)
-		groups.CurrentGroupId++ // 单协程处理下无需 atomic，若多协程则整体加锁
-		//continue        //过期了，不论是否是关键帧，我们都丢弃了，那么还需要继续等待下一个
-		return true
-	}
-	return false
-}
-
-func (sc *StreamChannel) RtpAddPacket(d *Depacketizer, packet *FecPacket) *FecGroup {
-	group, exists := d.Groups[packet.Header.GroupIdx]
-	isRtp := packet.Payload[0] == RtpHeader || packet.Payload[0] == VideoHeader
-	if !exists {
-		expireTime := MessageExpireTime
-		if isRtp {
-			expireTime = AudioExpireTime
-			if packet.Payload[0] == VideoHeader {
-				expireTime = VideoExpireTime
-			}
-		}
-		totalShards := packet.Header.DataShards + packet.Header.ParityShards
-		group = &FecGroup{
-			HeaderSample: &packet.Header, ExpiredAt: time.Now().Add(expireTime),
-			Shards: make([][]byte, totalShards), Packets: make([]*FecPacket, totalShards),
-			OosTime: time.Now(), ShardCount: packet.Header.DataShards, ShardDataLength: packet.Header.Length,
-			//GroupID: packet.Header.GroupIdx, DataShards: packet.Header.DataShards, ParityShards: packet.Header.ParityShards,
-			//Total: packet.Header.Total, Received: 0, CreatedAt: time.Now(),
-		}
-		if isRtp { //如果判定是rtp包，我们就需要预处理一下数据，方便后期补充rtp包
-			switch packet.Payload[1] {
-			case 0x61: //标准音频
-				group.HeaderTemplate = packet.Payload[:RtpHeaderLength]
-			case 0x7f: //动态音频
-				group.HeaderTemplate = packet.Payload[:AudioHeaderLength]
-			default: //其他都是视频 视频数据的rtp包数据都是一样的
-				group.HeaderTemplate = packet.Payload[:VideoHeaderLength]
-			}
-		} else {
-			group.HeaderTemplate = packet.Payload[:FecPacketHeaderLength] //因为信息一致性，我们其实不用再次赋值
-		}
-		sc.Depacketizers[packet.Header.Ssrc].Groups[packet.Header.GroupIdx] = group
-	}
-	outOfSequence := false
-	if packet.Header.SequenceNumber != d.NextSequenceNumber {
-		//slog.Debug("收到无序帧", slog.Int("channel", sc.ChannelId), slog.Any("group", packet.Header.GroupIdx),
-		//	slog.Any("SequenceNumber", packet.Header.SequenceNumber))
-		if utils.IsBefore16(packet.Header.SequenceNumber, d.NextSequenceNumber) {
-			// 迟到/重复包：检查是否已存在
-			if group.Packets[packet.Header.ShardIdx] != nil {
-				return group
-			}
-			outOfSequence = true
-		} else {
-			// 收到比预期大的 Seq，说明中间发生了缺包，累加 MissingPackets
-			d.MissingPackets += packet.Header.SequenceNumber - d.NextSequenceNumber
-			d.NextSequenceNumber = packet.Header.SequenceNumber + 1 //ps：这里直接跳到了最终
-		}
-	} else {
-		d.NextSequenceNumber++
-	}
-
-	if group.Packets[packet.Header.ShardIdx] == nil { //不接收一样的数据包,通过Packet来判断，shards因为需要用于恢复，这里不进行判断
-		headerLength := FecPacketHeaderLength
-		if isRtp { //如果是rtp包
-			switch packet.Payload[1] { //packetType
-			case 97:
-				headerLength = RtpHeaderLength
-			case 127:
-				headerLength = AudioHeaderLength
-			default: //video
-				headerLength = VideoHeaderLength
-			}
-		}
-		if int(packet.Header.Length) != len(packet.Payload[headerLength:]) { //数据包载体长度不一致，则丢弃
-			slog.Debug("数据长度不一致，丢弃！", slog.Int("channel", sc.ChannelId),
-				slog.Any("groupId", packet.Header.GroupIdx),
-				slog.Any("shardIndex", packet.Header.ShardIdx),
-				slog.Any("targetLength", packet.Header.Length),
-				slog.Int("shardDataLength", len(packet.Payload[headerLength:])))
-			return group
-		}
-		group.Shards[packet.Header.ShardIdx] = packet.Payload[headerLength:] //只加入验证过的数据
-		group.Packets[packet.Header.ShardIdx] = packet                       // 记录原始包指针
-		if outOfSequence && d.MissingPackets > 0 {                           //若这是补入的乱序包，修正 MissingPacket
-			d.MissingPackets--
-		}
-		if !group.HasParityShard && packet.Header.ShardIdx >= packet.Header.DataShards {
-			group.HasParityShard = true
-		}
-		group.Received++
-	}
-	presentationTimeUs := uint64(packet.Header.Timestamp) * 1000 / 90
-	if outOfSequence { //无序状态的数据，我们记录一下
-		d.LastOosFramePresentationTimestamp = presentationTimeUs
-		if !d.ReceivedOosData { //接收到无序的数据了
-			d.ReceivedOosData = true
-		}
-	} else if d.ReceivedOosData && presentationTimeUs > d.LastOosFramePresentationTimestamp+SPECULATIVE_RFI_COOLDOWN_PERIOD_US { //从无序中恢复
-		d.ReceivedOosData = false
-	}
-	return group
 }
 
 func (sc *StreamChannel) notifyFrameLost(ssrc uint8, frameIndex uint32, speculative bool) {
@@ -414,8 +258,48 @@ func (sc *StreamChannel) requestIdrFrame(ssrc uint8) {
 	slog.Debug("发送Idr 关键帧请求", slog.Any("ssrc", ssrc))
 }
 
+func (sc *StreamChannel) CheckDataReceiveTimeout(group *FecGroup, depacketizer *Depacketizer) bool {
+	if group.ExpiredAt.Before(time.Now()) { //如果已经过期，则不再等待，直接接收下一个
+		if group.HeaderTemplate[0] == RtpHeader && //音频数据是陆续发送的，我们允许按时间递增等待
+			(group.HeaderTemplate[1] == AudioHeader || group.HeaderTemplate[1] == AudioDynamicHeader) {
+			//expireTime := group.OosTime.Add(AudioOosExpireTime + time.Duration(group.ShardCount-1)*AudioDataTime)
+			//if expireTime.Before(time.Now()) {
+			//	slog.Debug("音频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
+			//		slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
+			//		slog.Any("合计", len(group.Shards)))
+			//todo:这里需要补充一下数据并告诉上层逻辑
+			for i := 0; i < int(group.ShardCount); i++ {
+				if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
+					group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
+				}
+				sc.handleDataToChannel(group.Shards[i])
+			}
+			//	depacketizer.DoNextGroup(group.HeaderSample.BlockCount)
+			//	return true
+			//}
+			//return false
+		} else if group.HeaderTemplate[0] == VideoHeader { //如果是我们的视频包
+			//expireTime := group.OosTime.Add(VideoOosExpireTime)
+			//if expireTime.Before(time.Now()) {
+			//	slog.Debug("视频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
+			//		slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
+			//		slog.Any("合计", len(group.Shards)))
+			//	depacketizer.DoNextGroup(group.HeaderSample.BlockCount)
+			//	return true
+			//}
+			return false //如果没有超过
+		}
+		slog.Debug("帧接收超时丢弃！", slog.Int("channel", sc.ChannelId),
+			slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
+			slog.Any("合计", len(group.Shards)))
+		depacketizer.DoNextGroup(group.HeaderSample.BlockCount)
+		return true
+	}
+	return false
+}
+
 func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
-	//slog.Debug("fec开始解码", slog.Any("channel id", sc.ChannelId), slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", packet.Header.GroupIdx))
+	//slog.Debug("fec开始解包", slog.Any("channel id", sc.ChannelId), slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", packet.Header.GroupIdx))
 	totalShards := packet.Header.DataShards + packet.Header.ParityShards
 	if packet.Header.ShardIdx >= totalShards {
 		return fmt.Errorf("无效的shard索引: %d", packet.Header.ShardIdx)
@@ -424,7 +308,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 	if !exists {
 		return fmt.Errorf("无效的通道数据: %d", packet.Header.Ssrc)
 	}
-	sc.RtpAddPacket(depacketizer, packet)
+	depacketizer.RtpAddPacket(packet)
 	for {
 		next, exists := depacketizer.Groups[depacketizer.CurrentGroupId]
 		if !exists {
@@ -434,34 +318,27 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 						slog.Any("received", packet.Header.GroupIdx))
 					tempGroup := depacketizer.Groups[packet.Header.GroupIdx]
 					if tempGroup.Received >= tempGroup.ShardCount { //新的已经接收满了
-						//todo:这里可能需要补充空洞数据,如果不补，应该也可以，从时间维度来说，无形中，还能追帧，从效果来说，可能出现音爆
 						target := uint16(packet.Header.GroupIdx)
 						if packet.Header.GroupIdx < depacketizer.CurrentGroupId {
 							target += math.MaxUint8
 						}
 						for i := uint16(depacketizer.CurrentGroupId); i < target; i++ {
 							delete(depacketizer.Groups, uint8(i)) //清空缓存
+							//todo:这里可能需要补充空洞数据,如果不补，应该也可以，从时间维度来说，无形中，还能追帧，从效果来说，可能出现音爆
 							//group, exists := depacketizer.Groups[uint8(i)]
 							//if exists {
 							//	delete(depacketizer.Groups, uint8(i)) //清空缓存
 							//	for i := 0; i < int(group.ShardCount); i++ {
-							//		if sc.Channel != nil {
-							//			if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-							//				group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
-							//			}
-							//			sc.Channel <- StreamChannelData{
-							//				ClientId:  sc.ClientId,
-							//				ChannelId: sc.ChannelId,
-							//				Offset:    0,
-							//				Data:      group.Shards[i], //直接使用原始数据包，实现零拷贝
-							//			}
+							//		if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
+							//			group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
 							//		}
+							//		sc.handleDataToChannel(group.Shards[i])
 							//	}
 							//} else {
 							//	continue
 							//}
 						}
-						slog.Debug("新的音频数据已经满足解码，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
+						slog.Debug("新的音频数据已经满足解包，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
 						depacketizer.CurrentGroupId = packet.Header.GroupIdx //直接跳到当前，旧的全部舍弃
 						continue
 					}
@@ -469,7 +346,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			}
 			break // 下一个组还没到来，退出循环
 		}
-		// 如果当前等待的组包数量还不足以解码，直接中断等待下一个网络包到达，切勿死循环！
+		// 如果当前等待的组包数量还不足以解包，直接中断等待下一个网络包到达，切勿死循环！
 		header := next.HeaderSample //连续组装，不能使用packet，而应该从当前分组取样本
 		if next.Received < header.DataShards {
 			if packet.Header.Header == 0x80 { //声音做简单的超时即可
@@ -506,32 +383,24 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 				}
 			}
 			// 关键优化：使用 ReconstructData 仅恢复数据分片，比 Reconstruct 省时省 CPU
-			encoder, err := sc.GetFecEncoder(header.DataShards, header.ParityShards)
+			encoder, err := depacketizer.GetFecEncoder(header.DataShards, header.ParityShards)
 			if err != nil {
-				return fmt.Errorf("获取fec解码器出错【%d】: %w", header.GroupIdx, err)
+				return fmt.Errorf("获取fec解包器出错【%d】: %w", header.GroupIdx, err)
 			}
 			err = encoder.ReconstructData(next.Shards)
 			if err != nil {
 				for i := 0; i < int(totalShards); i++ {
-					slog.Debug("解码报错，输出实际数据验证", slog.Int("shardIndex", i),
+					slog.Debug("解包报错，输出实际数据验证", slog.Int("shardIndex", i),
 						slog.Any("targetLength", next.ShardDataLength),
 						slog.Int("shardDataLength", len(next.Shards[i])))
 				}
-				delete(depacketizer.Groups, depacketizer.CurrentGroupId)
-				depacketizer.CurrentGroupId++
-				return fmt.Errorf("fec解码出错【%d】:  %w", header.GroupIdx, err)
+				depacketizer.DoNextGroup(next.HeaderSample.BlockCount)
+				return fmt.Errorf("fec解包出错【%d】:  %w", header.GroupIdx, err)
 			}
-			//slog.Debug("执行Fec解码逻辑", slog.Any("groupId", header.GroupIdx))
+			//slog.Debug("执行Fec解包逻辑", slog.Any("groupId", header.GroupIdx))
 		}
-		//slog.Debug("解码fec完成", slog.Int("groupId", int(next.GroupID)))
-		delete(depacketizer.Groups, header.GroupIdx)
-		depacketizer.CurrentGroupId++ // 单协程处理下无需 atomic，若多协程则整体加锁
-		depacketizer.CurrentBlockIndex++
-		if depacketizer.CurrentBlockIndex >= next.HeaderSample.BlockCount { //执行下一帧
-			depacketizer.CurrentBlockIndex = 0
-			depacketizer.CurrentFrameIndex++
-			depacketizer.ReportedLostFrame = false
-		}
+		//slog.Debug("解包fec完成", slog.Int("groupId", int(next.GroupID)))
+		depacketizer.DoNextGroup(next.HeaderSample.BlockCount)
 
 		if next.HeaderTemplate[0] == RtpHeader || next.HeaderTemplate[0] == VideoHeader { //如果是rtp包
 			//这里可以根据特性进行拼接数据,如果考虑尽量零拷贝处理next.Shards
@@ -542,15 +411,8 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			//slog.Debug("fec开始重组", slog.Any("channel id", sc.ChannelId), slog.Any("groupId", header.GroupIdx))
 			for i := 0; i < int(header.DataShards); i++ {
 				if !isVideo { //先只修改音频支持
-					if sc.Channel != nil {
-						//slog.Debug("执行音频直接接收并解码", slog.Int("size", len(next.Shards[i])))
-						sc.Channel <- StreamChannelData{
-							ClientId:  sc.ClientId,
-							ChannelId: sc.ChannelId,
-							Offset:    0,
-							Data:      next.Shards[i], //直接使用原始数据包，实现零拷贝
-						}
-					}
+					//slog.Debug("执行音频直接接收并解包", slog.Int("size", len(next.Shards[i])))
+					sc.handleDataToChannel(next.Shards[i]) //直接使用原始数据包，实现零拷贝
 				} else {
 					var resultData []byte
 					if next.Packets[i] == nil { //Payload 是携带rtp包头信息的完整数据缓存
@@ -563,14 +425,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 						binary.LittleEndian.PutUint32(resultData[28:32], oldFecInfo&^(0x7F<<4))
 					}
 					//slog.Debug("fec重组了一条数据", slog.Any("channel id", sc.ChannelId), slog.Any("shard index", i))
-					if sc.Channel != nil {
-						sc.Channel <- StreamChannelData{
-							ClientId:  sc.ClientId,
-							ChannelId: sc.ChannelId,
-							Offset:    0,
-							Data:      resultData, //直接使用原始数据包，实现零拷贝
-						}
-					}
+					sc.handleDataToChannel(resultData)
 				}
 			}
 			//slog.Debug("fec完成重组", slog.Any("channel id", sc.ChannelId), slog.Any("groupId", header.GroupIdx))
@@ -583,32 +438,19 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 				}
 			}
 			//slog.Debug("fec重组了一条数据", slog.Any("frame", frameBuf.String()))
-			if sc.Channel != nil {
-				sc.Channel <- StreamChannelData{
-					ClientId:  sc.ClientId,
-					ChannelId: sc.ChannelId,
-					Offset:    0,
-					Data:      frameBuf.Bytes(),
-				}
-			}
+			sc.handleDataToChannel(frameBuf.Bytes())
 		}
 	}
 	return nil
 }
 
-func (sc *StreamChannel) GetFecEncoder(dataShards, parityShards uint8) (reedsolomon.Encoder, error) {
-	if dataShards > 0 && parityShards > 0 {
-		key := fmt.Sprintf("%d_%d", dataShards, parityShards)
-		sc.lockEncoders.Lock()
-		defer sc.lockEncoders.Unlock()
-		if sc.FecEncoders[key] == nil {
-			encoder, err := reedsolomon.New(int(dataShards), int(parityShards))
-			if err != nil {
-				return nil, err
-			}
-			sc.FecEncoders[key] = encoder
+func (sc *StreamChannel) handleDataToChannel(data []byte) {
+	if sc.Channel != nil {
+		sc.Channel <- StreamChannelData{
+			ClientId:  sc.ClientId,
+			ChannelId: sc.ChannelId,
+			Offset:    0,
+			Data:      data,
 		}
-		return sc.FecEncoders[key], nil
 	}
-	return nil, nil
 }

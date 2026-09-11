@@ -8,7 +8,6 @@ import (
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/quic-go/quic-go"
 	"log/slog"
-	"math"
 	"net"
 	"sync"
 	"syscall"
@@ -266,7 +265,7 @@ func (s *Socket) HandleChannelStreamDatagram() {
 			}
 			err = sc.FecDecode(packet)
 			if err != nil {
-				slog.Error("解码fec过程发生错误", slog.Any("channelId", packet.Header.ChannelId), slog.Any("err", err))
+				slog.Error("解包fec过程发生错误", slog.Any("channelId", packet.Header.ChannelId), slog.Any("err", err))
 				continue
 			}
 		}
@@ -278,11 +277,11 @@ func (s *Socket) InitFecParam(channelId int) error {
 	if config.EnableFec {
 		if config.Type == Audio { //音频大约一个数据包是334大小左右，我们直接塞进一个里面
 			total := config.DataShards + config.ParityShards
-			fecGroup := s.StreamChannels[channelId].Depacketizers[0]
-			fecGroup.SharedShards = make([][]byte, total)
-			fecGroup.ParityShards = make([][]byte, config.ParityShards)
+			packetizer := s.StreamChannels[channelId].Packetizers[0]
+			packetizer.SharedShards = make([][]byte, total)
+			packetizer.ParityShards = make([][]byte, config.ParityShards)
 			for i := uint8(0); i < config.ParityShards; i++ {
-				fecGroup.ParityShards[i] = make([]byte, config.FecPacketSize)
+				packetizer.ParityShards[i] = make([]byte, config.FecPacketSize)
 			}
 			slog.Debug("音频奇偶校验缓存已经分配！")
 		}
@@ -416,33 +415,23 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		depacketizer = NewDepacketizer()
 		s.StreamChannels[result.Header.ChannelId].Depacketizers[result.Header.Ssrc] = depacketizer
 	}
+	group, exists := depacketizer.Groups[result.Header.GroupIdx]
+	if exists && group.Shards[result.Header.ShardIdx] != nil { //检查数据包是否存在，如果存在，则丢弃，不再接收
+		return nil
+	}
 	//检查是否是否需要丢弃
-	if utils.IsBefore8(result.Header.GroupIdx, depacketizer.CurrentGroupId) { //已经解码成功的Id就不要了
+	if utils.IsBefore8(result.Header.GroupIdx, depacketizer.CurrentGroupId) { //已经解包成功的Id就不要了
 		//slog.Debug("收到更早的数据分组数据，丢弃", slog.Any("channel", result.Header.ChannelId),
 		//	slog.Any("currentGroupIndex", depacketizer.CurrentGroupId),
 		//	slog.Any("packetGroupIndex", result.Header.GroupIdx))
 		return nil
 	}
 	if result.Header.Idr == 1 { //如果是 关键帧，则移动当前数据到本帧，并丢弃前面的数据,执行追帧
-		if depacketizer.WaitingForIdrFrame {
+		if depacketizer.WaitingForIdrFrame && result.Header.BlockIdx == 0 {
 			slog.Debug("收到关键帧，正在执行追帧！", slog.Any("ssrc", result.Header.Ssrc), slog.Any("目标帧", result.Header.FrameIndex))
 			depacketizer.WaitingForIdrFrame = false
 		}
-		if utils.IsBefore8(depacketizer.CurrentGroupId, result.Header.GroupIdx) {
-			slog.Debug("帧接收新的关键帧，跳到！", slog.Any("channel", result.Header.ChannelId),
-				slog.Any("groupId", result.Header.GroupIdx))
-
-			target := int(result.Header.GroupIdx)
-			if result.Header.GroupIdx < depacketizer.CurrentGroupId { //考虑溢出问题
-				target = int(result.Header.GroupIdx) + math.MaxUint8
-			}
-			for i := int(depacketizer.CurrentGroupId); i < target; i++ {
-				delete(depacketizer.Groups, uint8(i))
-			}
-			depacketizer.CurrentGroupId = result.Header.GroupIdx
-			depacketizer.CurrentFrameIndex = result.Header.FrameIndex
-			depacketizer.CurrentBlockIndex = 0
-		}
+		depacketizer.JumpToNextIdrPacket(result)
 	}
 	return result
 }
@@ -470,29 +459,29 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 		//另外，因为是一个一个发的，所以要保留其数据包头
 		sequenceNumber := binary.BigEndian.Uint16(data[2:]) //取出序列号
 		index := uint8(sequenceNumber % uint16(config.DataShards))
-		fecGroup := channel.Depacketizers[0]
-		fecGroup.SharedShards[index] = data[RtpHeaderLength:dataSize]
+		packetizer := channel.Packetizers[0]
+		packetizer.SharedShards[index] = data[RtpHeaderLength:dataSize]
 		if data[0] != RtpHeader {
 			slog.Debug("发送的数据包不是合格的rtp包,audio data")
 		}
 		_ = s.Conn.SendDatagram(data)     //发送处理好的数据
 		if index == config.DataShards-1 { //生成fec
-			encoder, err := channel.GetFecEncoder(config.DataShards, config.ParityShards)
+			encoder, err := packetizer.GetFecEncoder(config.DataShards, config.ParityShards)
 			if err != nil {
 				return false, err
 			}
 			totalShards := config.DataShards + config.ParityShards
 			parityShardSize := dataSize + 12
 			for i := config.DataShards; i < totalShards; i++ { //补发奇偶校验包
-				if fecGroup.SharedShards[i] == nil || cap(fecGroup.SharedShards[i]) != parityShardSize {
-					fecGroup.SharedShards[i] = fecGroup.ParityShards[i-config.DataShards][AudioHeaderLength:parityShardSize]
+				if packetizer.SharedShards[i] == nil || cap(packetizer.SharedShards[i]) != parityShardSize {
+					packetizer.SharedShards[i] = packetizer.ParityShards[i-config.DataShards][AudioHeaderLength:parityShardSize]
 				}
-				clear(fecGroup.SharedShards[i]) //清除数据防止脏读
+				clear(packetizer.SharedShards[i]) //清除数据防止脏读
 			}
-			err = encoder.Encode(fecGroup.SharedShards) //生成fec结果
+			err = encoder.Encode(packetizer.SharedShards) //生成fec结果
 			if err != nil {
-				slog.Debug("编码fec过程发生错误", slog.Int("channelId", channelId),
-					slog.Any("sequenceNumber", sequenceNumber), slog.Int("length", len(fecGroup.SharedShards)),
+				slog.Debug("打包fec过程发生错误", slog.Int("channelId", channelId),
+					slog.Any("sequenceNumber", sequenceNumber), slog.Int("length", len(packetizer.SharedShards)),
 					slog.Any("DataShards", config.DataShards), slog.Any("ParityShards", config.ParityShards),
 					slog.Any("err", err))
 				return false, err
@@ -502,18 +491,18 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 			baseTimestamp := binary.BigEndian.Uint32(data[4:])
 			baseTimestamp = uint32(time.UnixMilli(int64(baseTimestamp)).Add(time.Duration(-offset) * AudioDataTime).UnixMilli())
 			for i := uint8(0); i < config.ParityShards; i++ { //补发奇偶校验包
-				fecGroup.ParityShards[i][0] = data[0]
-				fecGroup.ParityShards[i][1] = 127
-				binary.BigEndian.PutUint16(fecGroup.ParityShards[i][2:], sequenceNumber+uint16(i)+1)
-				copy(fecGroup.ParityShards[i][4:12], data[4:12])
-				fecGroup.ParityShards[i][12] = i //fecShardIndex
-				fecGroup.ParityShards[i][13] = 97
-				binary.BigEndian.PutUint16(fecGroup.ParityShards[i][14:], baseSequenceNumber)
-				binary.BigEndian.PutUint32(fecGroup.ParityShards[i][16:], baseTimestamp)
-				copy(fecGroup.ParityShards[i][20:24], data[8:12])
-				_ = s.Conn.SendDatagram(fecGroup.ParityShards[i][:parityShardSize]) //发送处理好的数据
+				packetizer.ParityShards[i][0] = data[0]
+				packetizer.ParityShards[i][1] = 127
+				binary.BigEndian.PutUint16(packetizer.ParityShards[i][2:], sequenceNumber+uint16(i)+1)
+				copy(packetizer.ParityShards[i][4:12], data[4:12])
+				packetizer.ParityShards[i][12] = i //fecShardIndex
+				packetizer.ParityShards[i][13] = 97
+				binary.BigEndian.PutUint16(packetizer.ParityShards[i][14:], baseSequenceNumber)
+				binary.BigEndian.PutUint32(packetizer.ParityShards[i][16:], baseTimestamp)
+				copy(packetizer.ParityShards[i][20:24], data[8:12])
+				_ = s.Conn.SendDatagram(packetizer.ParityShards[i][:parityShardSize]) //发送处理好的数据
 			}
-			//slog.Debug("执行音频fec编码发送", slog.Any("ParityShards", config.ParityShards))
+			//slog.Debug("执行音频fec打包发送", slog.Any("ParityShards", config.ParityShards))
 		}
 	case Video: //支持媒体流传输的特殊协议
 		length := len(data)
@@ -537,7 +526,7 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 		if parityShards < s.FecMinRequiredPackets && fecPercentage != 0 {
 			parityShards = s.FecMinRequiredPackets
 			fecPercentage = (100 * parityShards) / dataShards //取下整
-			slog.Debug("编码fec过程因fec parity shard 太少，增加fec百分比", slog.Any("百分比", fecPercentage))
+			slog.Debug("打包fec过程因fec parity shard 太少，增加fec百分比", slog.Any("百分比", fecPercentage))
 		}
 		//slog.Debug("fec分片结果", slog.Any("dataShards", dataShards), slog.Any("parityShards", parityShards))
 		totalShards := dataShards + parityShards
@@ -584,13 +573,13 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				buffer[i][26] = 0
 				shards[i] = buffer[i][VideoHeaderLength:blockSize]
 			}
-			encoder, err := channel.GetFecEncoder(dataShards, parityShards)
+			encoder, err := packetizer.GetFecEncoder(dataShards, parityShards)
 			if err != nil {
 				return false, err
 			}
 			err = encoder.Encode(shards)
 			if err != nil {
-				slog.Debug("编码fec过程发生错误", slog.Int("channelId", channelId),
+				slog.Debug("打包fec过程发生错误", slog.Int("channelId", channelId),
 					slog.Any("DataShards", dataShards), slog.Any("ParityShards", parityShards),
 					slog.Any("err", err))
 				return false, err
@@ -622,7 +611,7 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 		if totalShards > 255 { //为了防止数据分片过大，我们进行大小的压缩
 			targetParityShards = 255 - targetDataShards
 		}
-		encoder, err := channel.GetFecEncoder(targetDataShards, targetParityShards)
+		encoder, err := packetizer.GetFecEncoder(targetDataShards, targetParityShards)
 		if err != nil {
 			return false, err
 		}
@@ -632,7 +621,7 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 		}
 		err = encoder.Encode(shards)
 		if err != nil {
-			slog.Debug("编码fec过程发生错误", slog.Int("channelId", channelId),
+			slog.Debug("打包fec过程发生错误", slog.Int("channelId", channelId),
 				slog.Any("DataShards", targetDataShards), slog.Any("ParityShards", targetParityShards),
 				slog.Any("err", err))
 			return false, err
