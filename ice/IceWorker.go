@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"github.com/DeleteElf/zero-net/framework/utils"
-	"github.com/deleteelf/goframework/utils/jsonhelper"
 	"github.com/pion/ice/v4"
 	"log/slog"
 	"net"
@@ -132,7 +131,7 @@ func (iw *IceWorker) DetectStun(portMin, portMax uint16) (offer string, err erro
 		localInfo.Candidates = append(localInfo.Candidates, candidate)
 	}
 
-	localJSON, _ := jsonhelper.ToJsonByte(localInfo)
+	localJSON, _ := utils.ToJsonByte(localInfo)
 	localB64 := base64.StdEncoding.EncodeToString(localJSON)
 
 	return localB64, nil
