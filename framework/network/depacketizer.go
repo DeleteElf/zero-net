@@ -20,6 +20,10 @@ type FecGroup struct {
 	OosTime         time.Time //当前分组的首个数据包到达时间
 	ShardCount      uint8     //当前分组的数据分片数量
 	ShardDataLength uint16
+	//计算起始的第一个
+	StartSequenceNumber uint16
+	//最大的序列号
+	MaxSequenceNumber uint16
 }
 
 // Depacketizer 解包器
@@ -32,8 +36,8 @@ type Depacketizer struct {
 	NextSequenceNumber uint16
 	// 是否正在等待下个关键帧
 	WaitingForIdrFrame bool
-	// 开始帧索引
-	//StartFrameIndex uint32
+	// 开始帧索引，用于丢包统计
+	StartFrameIndex uint32
 	// 是否已经报告丢帧
 	ReportedLostFrame bool
 	//丢包数量
@@ -75,6 +79,25 @@ func (d *Depacketizer) JumpToNextIdrPacket(p *FecPacket) {
 	}
 }
 
+func (d *Depacketizer) JumpToNextGroup(groupId uint8) {
+	if utils.IsBefore8(d.CurrentGroupId, groupId) { //只能往后跳，还最多只能跳127
+		slog.Debug("跳帧到下个分组", slog.Any("groupId", groupId))
+		target := int(groupId)
+		if groupId < d.CurrentGroupId { //考虑溢出问题
+			target = int(groupId) + math.MaxUint8
+		}
+		for i := int(d.CurrentGroupId); i < target; i++ {
+			delete(d.Groups, uint8(i))
+		}
+		d.CurrentGroupId = groupId
+		d.CurrentFrameIndex = 0 //如果有用，需要后续自己修复
+		d.CurrentBlockIndex = 0 //如果有用，需要后续自己修复
+		d.MissingPackets = 0
+		d.ReportedLostFrame = false
+		d.ReceivedOosData = false
+	}
+}
+
 func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 	delete(d.Groups, d.CurrentGroupId)
 	d.CurrentGroupId++
@@ -88,7 +111,7 @@ func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 	}
 }
 
-func (d *Depacketizer) RtpAddPacket(packet *FecPacket) *FecGroup {
+func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 	group, exists := d.Groups[packet.Header.GroupIdx]
 	isRtp := packet.Payload[0] == RtpHeader || packet.Payload[0] == VideoHeader
 	if !exists {
@@ -121,25 +144,6 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) *FecGroup {
 		}
 		d.Groups[packet.Header.GroupIdx] = group
 	}
-	outOfSequence := false
-	if packet.Header.SequenceNumber != d.NextSequenceNumber {
-		//slog.Debug("收到无序帧", slog.Int("channel", sc.ChannelId), slog.Any("group", packet.Header.GroupIdx),
-		//	slog.Any("SequenceNumber", packet.Header.SequenceNumber))
-		if utils.IsBefore16(packet.Header.SequenceNumber, d.NextSequenceNumber) {
-			// 迟到/重复包：检查是否已存在
-			if group.Packets[packet.Header.ShardIdx] != nil {
-				return group
-			}
-			outOfSequence = true
-		} else {
-			// 收到比预期大的 Seq，说明中间发生了缺包，累加 MissingPackets
-			d.MissingPackets += packet.Header.SequenceNumber - d.NextSequenceNumber
-			d.NextSequenceNumber = packet.Header.SequenceNumber + 1 //ps：这里直接跳到了最终
-		}
-	} else {
-		d.NextSequenceNumber++
-	}
-
 	if group.Packets[packet.Header.ShardIdx] == nil { //不接收一样的数据包,通过Packet来判断，shards因为需要用于恢复，这里不进行判断
 		headerLength := FecPacketHeaderLength
 		if isRtp { //如果是rtp包
@@ -159,30 +163,53 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) *FecGroup {
 				slog.Any("shardIndex", packet.Header.ShardIdx),
 				slog.Any("targetLength", packet.Header.Length),
 				slog.Int("shardDataLength", len(packet.Payload[headerLength:])))
-			return group
+			return false
 		}
 		group.Shards[packet.Header.ShardIdx] = packet.Payload[headerLength:] //只加入验证过的数据
 		group.Packets[packet.Header.ShardIdx] = packet                       // 记录原始包指针
-		if outOfSequence && d.MissingPackets > 0 {                           //若这是补入的乱序包，修正 MissingPacket
-			d.MissingPackets--
-		}
 		if !group.HasParityShard && packet.Header.ShardIdx >= packet.Header.DataShards {
 			group.HasParityShard = true
 		}
-		group.Received++
-	}
-	presentationTimeUs := uint64(packet.Header.Timestamp) * 1000 / 90
-	if outOfSequence { //无序状态的数据，我们记录一下
-		d.LastOosFramePresentationTimestamp = presentationTimeUs
-		if !d.ReceivedOosData { //接收到无序的数据了
-			d.ReceivedOosData = true
-			slog.Debug("进入无序状态", slog.Any("ssrc", packet.Header.Ssrc))
+		if utils.IsBefore16(group.MaxSequenceNumber, packet.Header.SequenceNumber) {
+			group.MaxSequenceNumber = packet.Header.SequenceNumber //更新最大序列
 		}
-	} else if d.ReceivedOosData && presentationTimeUs > d.LastOosFramePresentationTimestamp+SPECULATIVE_RFI_COOLDOWN_PERIOD_US { //从无序中恢复
-		d.ReceivedOosData = false
-		slog.Debug("退出无序状态", slog.Any("ssrc", packet.Header.Ssrc))
+		if group.Received == 0 { //接收第一个计算一次就好了
+			group.StartSequenceNumber = packet.Header.SequenceNumber - uint16(packet.Header.ShardIdx)
+		}
+		group.Received++
+		if packet.Header.GroupIdx == d.CurrentGroupId { //如果等于当前分组我们需要计算丢包率
+			outOfSequence := false
+			if packet.Header.SequenceNumber != d.NextSequenceNumber {
+				outOfSequence = true
+				//slog.Debug("收到无序帧", slog.Int("channel", sc.ChannelId), slog.Any("group", packet.Header.GroupIdx),
+				//	slog.Any("SequenceNumber", packet.Header.SequenceNumber))
+				if utils.IsBefore16(packet.Header.SequenceNumber, d.NextSequenceNumber) { //比下个小，就补充一个包，减少一个丢包
+					if d.MissingPackets > 0 { //若这是补入的乱序包，修正 MissingPacket
+						d.MissingPackets--
+					}
+				} else {
+					// 收到比预期大的 Seq，说明中间发生了缺包，累加 MissingPackets
+					d.MissingPackets += packet.Header.SequenceNumber - d.NextSequenceNumber
+					d.NextSequenceNumber = packet.Header.SequenceNumber + 1 //ps：这里直接跳到了最终
+				}
+			} else { //正常递增，不减少丢包
+				d.NextSequenceNumber++
+			}
+			presentationTimeUs := uint64(packet.Header.Timestamp) * 1000 / 90
+			if outOfSequence { //无序状态的数据，我们记录一下
+				d.LastOosFramePresentationTimestamp = presentationTimeUs
+				if !d.ReceivedOosData { //接收到无序的数据了
+					d.ReceivedOosData = true
+					//slog.Debug("进入无序状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
+				}
+			} else if d.ReceivedOosData && presentationTimeUs > d.LastOosFramePresentationTimestamp+SPECULATIVE_RFI_COOLDOWN_PERIOD_US { //从无序中恢复
+				d.ReceivedOosData = false
+				//slog.Debug("退出无序状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
+			}
+		}
+		return true
 	}
-	return group
+	return false
 }
 
 //func (d *Depacketizer) Decode(sc *StreamChannel, p *FecPacket) error {

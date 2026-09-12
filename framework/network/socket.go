@@ -284,6 +284,7 @@ func (s *Socket) InitFecParam(channelId int) error {
 				packetizer.ParityShards[i] = make([]byte, config.FecPacketSize)
 			}
 			slog.Debug("音频奇偶校验缓存已经分配！")
+			s.StreamChannels[channelId].Depacketizers[0].JumpToNextGroup(100) //音频前100个可能会比屏幕更早出来，我们直接跳过，丢弃
 		}
 	}
 	return nil // s.StreamChannels[channelId].BuildFecEncoder()
@@ -415,10 +416,7 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		depacketizer = NewDepacketizer()
 		s.StreamChannels[result.Header.ChannelId].Depacketizers[result.Header.Ssrc] = depacketizer
 	}
-	group, exists := depacketizer.Groups[result.Header.GroupIdx]
-	if exists && group.Shards[result.Header.ShardIdx] != nil { //检查数据包是否存在，如果存在，则丢弃，不再接收
-		return nil
-	}
+
 	//检查是否是否需要丢弃
 	if utils.IsBefore8(result.Header.GroupIdx, depacketizer.CurrentGroupId) { //已经解包成功的Id就不要了
 		//slog.Debug("收到更早的数据分组数据，丢弃", slog.Any("channel", result.Header.ChannelId),

@@ -310,9 +310,9 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 	}
 	depacketizer.RtpAddPacket(packet)
 	for {
-		next, exists := depacketizer.Groups[depacketizer.CurrentGroupId]
+		nextGroup, exists := depacketizer.Groups[depacketizer.CurrentGroupId]
 		if !exists {
-			if packet.Header.Header == 0x80 {
+			if packet.Header.Header == 0x80 { //音频数据包
 				if utils.IsBefore8(depacketizer.CurrentGroupId, packet.Header.GroupIdx) { //只需要处理数据包比当前待处理的还新，这一个问题
 					slog.Debug("收到了新的音频，但是不是期望的音频", slog.Any("target", depacketizer.CurrentGroupId),
 						slog.Any("received", packet.Header.GroupIdx))
@@ -325,18 +325,6 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 						for i := uint16(depacketizer.CurrentGroupId); i < target; i++ {
 							delete(depacketizer.Groups, uint8(i)) //清空缓存
 							//todo:这里可能需要补充空洞数据,如果不补，应该也可以，从时间维度来说，无形中，还能追帧，从效果来说，可能出现音爆
-							//group, exists := depacketizer.Groups[uint8(i)]
-							//if exists {
-							//	delete(depacketizer.Groups, uint8(i)) //清空缓存
-							//	for i := 0; i < int(group.ShardCount); i++ {
-							//		if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-							//			group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
-							//		}
-							//		sc.handleDataToChannel(group.Shards[i])
-							//	}
-							//} else {
-							//	continue
-							//}
 						}
 						slog.Debug("新的音频数据已经满足解包，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
 						depacketizer.CurrentGroupId = packet.Header.GroupIdx //直接跳到当前，旧的全部舍弃
@@ -347,39 +335,64 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			break // 下一个组还没到来，退出循环
 		}
 		// 如果当前等待的组包数量还不足以解包，直接中断等待下一个网络包到达，切勿死循环！
-		header := next.HeaderSample //连续组装，不能使用packet，而应该从当前分组取样本
-		if next.Received < header.DataShards {
+		header := nextGroup.HeaderSample //连续组装，不能使用packet，而应该从当前分组取样本
+		if nextGroup.Received < header.DataShards {
 			if packet.Header.Header == 0x80 { //声音做简单的超时即可
-				if sc.CheckDataReceiveTimeout(next, depacketizer) {
+				if sc.CheckDataReceiveTimeout(nextGroup, depacketizer) {
 					continue
 				}
-			} else { //视频
-				if !depacketizer.ReportedLostFrame && !depacketizer.ReceivedOosData {
-					if depacketizer.MissingPackets > uint16(header.ParityShards) {
-						sc.notifyFrameLost(packet.Header.Ssrc, depacketizer.CurrentFrameIndex, true)
-						depacketizer.ReportedLostFrame = true
+			} else {                                                                                          //视频数据包
+				if depacketizer.StartFrameIndex != depacketizer.CurrentFrameIndex && nextGroup.Received > 0 { //重新计算当前分组的丢包情况
+					outOfSequence := false
+					seqNumber := (nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber + 1) & 0xFFFF
+					if seqNumber != uint16(nextGroup.Received) { //检查当前待处理的数据包 是否是当前分组的最大序列
+						outOfSequence = true
+						depacketizer.MissingPackets += seqNumber - uint16(nextGroup.Received) //计算丢帧数量
+					}
+					depacketizer.NextSequenceNumber = (nextGroup.MaxSequenceNumber + 1) & 0xFFFF //ps：这里直接跳到了最终
+					maxIdx := nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber
+					p := nextGroup.Packets[uint8(maxIdx)]
+					if p == nil {
+						slog.Debug("出意外了！！！！")
+						for i := int(maxIdx) - 1; i >= 0; i-- {
+							if p == nil {
+								p = nextGroup.Packets[uint8(i)]
+								continue
+							}
+							break
+						}
+					}
+					if p != nil { //如果p一直为空，则等待下一次继续处理。
+						presentationTimeUs := uint64(p.Header.Timestamp) * 1000 / 90
+						if outOfSequence { //无序状态的数据，我们记录一下
+							depacketizer.LastOosFramePresentationTimestamp = presentationTimeUs
+							if !depacketizer.ReceivedOosData { //接收到无序的数据了
+								depacketizer.ReceivedOosData = true
+							}
+						}
+						depacketizer.StartFrameIndex = depacketizer.CurrentFrameIndex //更新到当前帧
 					}
 				}
 			}
 			break // 无论音频还是视频，数据未凑齐前退出循环，等待下一个 UDP 包
 		}
-		//事实证明数据凑齐了：检查是否打脸了之前的 Speculative RFI 误报
-		if depacketizer.ReportedLostFrame && !depacketizer.ReceivedOosData {
+		//事实证明数据凑齐了：检查是否打脸了之前的 推测的 RFI 误报
+		if depacketizer.ReportedLostFrame && !depacketizer.ReceivedOosData { //如果报告了丢帧，但是又恢复了有序，则表示误报
 			// 如果事实证明我们对主办方撒了谎，那就暂时停止进一步的推测性信息请求（RFI）。
 			depacketizer.ReceivedOosData = true
 			depacketizer.LastOosFramePresentationTimestamp = uint64(header.Timestamp) * 1000 / 90
-			slog.Debug("因误判丢帧退出 Speculative RFI 模式", slog.Any("frame", depacketizer.CurrentFrameIndex))
+			slog.Debug("因误判丢帧退出 推测的 RFI 模式，进入无序状态", slog.Any("frame", depacketizer.CurrentFrameIndex))
 		}
 
-		if next.HasParityShard { //包含奇偶校验分片，才执行
+		if nextGroup.HasParityShard { //包含奇偶校验分片，才执行
 			for i := 0; i < int(header.DataShards); i++ {
-				if next.Shards[i] == nil { // 丢失的分片：分配 maxLen 字节的零值切片供 RS 恢复
-					next.Shards[i] = make([]byte, next.ShardDataLength)
+				if nextGroup.Shards[i] == nil { // 丢失的分片：分配 maxLen 字节的零值切片供 RS 恢复
+					nextGroup.Shards[i] = make([]byte, nextGroup.ShardDataLength)
 				}
-				if len(next.Shards[i]) != int(next.ShardDataLength) {
+				if len(nextGroup.Shards[i]) != int(nextGroup.ShardDataLength) {
 					slog.Debug("数据分片长度错误！", slog.Int("shardIndex", i),
-						slog.Any("targetLength", next.ShardDataLength),
-						slog.Int("shardDataLength", len(next.Shards[i])))
+						slog.Any("targetLength", nextGroup.ShardDataLength),
+						slog.Int("shardDataLength", len(nextGroup.Shards[i])))
 				}
 			}
 			// 关键优化：使用 ReconstructData 仅恢复数据分片，比 Reconstruct 省时省 CPU
@@ -387,38 +400,38 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			if err != nil {
 				return fmt.Errorf("获取fec解包器出错【%d】: %w", header.GroupIdx, err)
 			}
-			err = encoder.ReconstructData(next.Shards)
+			err = encoder.ReconstructData(nextGroup.Shards)
 			if err != nil {
 				for i := 0; i < int(totalShards); i++ {
 					slog.Debug("解包报错，输出实际数据验证", slog.Int("shardIndex", i),
-						slog.Any("targetLength", next.ShardDataLength),
-						slog.Int("shardDataLength", len(next.Shards[i])))
+						slog.Any("targetLength", nextGroup.ShardDataLength),
+						slog.Int("shardDataLength", len(nextGroup.Shards[i])))
 				}
-				depacketizer.DoNextGroup(next.HeaderSample.BlockCount)
+				depacketizer.DoNextGroup(nextGroup.HeaderSample.BlockCount)
 				return fmt.Errorf("fec解包出错【%d】:  %w", header.GroupIdx, err)
 			}
 			//slog.Debug("执行Fec解包逻辑", slog.Any("groupId", header.GroupIdx))
 		}
-		//slog.Debug("解包fec完成", slog.Int("groupId", int(next.GroupID)))
-		depacketizer.DoNextGroup(next.HeaderSample.BlockCount)
+		//slog.Debug("解包fec完成", slog.Int("groupId", int(nextGroup.GroupID)))
+		depacketizer.DoNextGroup(nextGroup.HeaderSample.BlockCount)
 
-		if next.HeaderTemplate[0] == RtpHeader || next.HeaderTemplate[0] == VideoHeader { //如果是rtp包
+		if nextGroup.HeaderTemplate[0] == RtpHeader || nextGroup.HeaderTemplate[0] == VideoHeader { //如果是rtp包
 			//这里可以根据特性进行拼接数据,如果考虑尽量零拷贝处理next.Shards
 			//现在这里有几个问题：
 			//1，我需要补充没有到的正规rtp 包的头信息 ，假设 一共6个数据包，数据分片是4个，当前到达的索引是 0,1,3,4，那么则需要补充序号是2的rtp头
 			//2，我需要告诉上层逻辑，fec已经处理完毕了
-			isVideo := next.HeaderTemplate[1] != 0x61 && next.HeaderTemplate[1] != 0x7f
+			isVideo := nextGroup.HeaderTemplate[1] != 0x61 && nextGroup.HeaderTemplate[1] != 0x7f
 			//slog.Debug("fec开始重组", slog.Any("channel id", sc.ChannelId), slog.Any("groupId", header.GroupIdx))
 			for i := 0; i < int(header.DataShards); i++ {
 				if !isVideo { //先只修改音频支持
-					//slog.Debug("执行音频直接接收并解包", slog.Int("size", len(next.Shards[i])))
-					sc.handleDataToChannel(next.Shards[i]) //直接使用原始数据包，实现零拷贝
+					//slog.Debug("执行音频直接接收并解包", slog.Int("size", len(nextGroup.Shards[i])))
+					sc.handleDataToChannel(nextGroup.Shards[i]) //直接使用原始数据包，实现零拷贝
 				} else {
 					var resultData []byte
-					if next.Packets[i] == nil { //Payload 是携带rtp包头信息的完整数据缓存
-						resultData = RebuildRtpPacket(next.HeaderTemplate, next.Shards[i], uint8(i), header.DataShards)
+					if nextGroup.Packets[i] == nil { //Payload 是携带rtp包头信息的完整数据缓存
+						resultData = RebuildRtpPacket(nextGroup.HeaderTemplate, nextGroup.Shards[i], uint8(i), header.DataShards)
 					} else { //清除fecPercentage的数据
-						resultData = next.Packets[i].Payload //直接使用原始数据包，实现零拷贝
+						resultData = nextGroup.Packets[i].Payload //直接使用原始数据包，实现零拷贝
 					}
 					if isVideo { //因为我们已经处理过fec了，必须告诉上层没有fec分片数据了
 						oldFecInfo := binary.LittleEndian.Uint32(resultData[28:])
@@ -432,9 +445,9 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 		} else {
 			//slog.Debug("fec收到意料外的数据", slog.Any("channel id", sc.ChannelId))
 			var frameBuf bytes.Buffer
-			for i := 0; i < int(next.ShardCount); i++ {
-				if len(next.Shards[i]) > 0 {
-					frameBuf.Write(next.Shards[i])
+			for i := 0; i < int(nextGroup.ShardCount); i++ {
+				if len(nextGroup.Shards[i]) > 0 {
+					frameBuf.Write(nextGroup.Shards[i])
 				}
 			}
 			//slog.Debug("fec重组了一条数据", slog.Any("frame", frameBuf.String()))
