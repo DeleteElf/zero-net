@@ -200,17 +200,6 @@ func (sc *StreamChannel) notifyFrameLost(ssrc uint8, frameIndex uint32, speculat
 
 func (sc *StreamChannel) connectionDetectedFrameLoss(ssrc uint8, start, end uint32) {
 	sc.requestRfiFrame(ssrc, start, end)
-	////todo:这个暂时先有上层逻辑显示,存在lbq的逻辑
-	//if !utils.IsBefore32(end, start) { //start<=end
-	//	data := make([]byte, 13)                        //如果加上头 应该是15
-	//	binary.LittleEndian.PutUint16(data[0:], 0x0350) //这里还不是非常确定是这个，因为主机端没有看到对应的接收
-	//	binary.LittleEndian.PutUint32(data[2:], uint32(ssrc))
-	//	binary.LittleEndian.PutUint32(data[6:], start)
-	//	binary.LittleEndian.PutUint32(data[10:], end)
-	//	data[14] = 0x01 //Rfi
-	//	//_, _ = sc.Send(data)
-	//	slog.Debug("发送Rfi帧申请！协议不太对", slog.Any("ssrc", ssrc), slog.Any("startFrameIndex", start), slog.Any("endFrameIndex", end))
-	//}
 }
 
 // 用来通知主机，已经完成的帧，当我们接收到一个帧时，更新当前帧的编号，如果该帧是LTR（丢失传输请求），则发送ACK（确认）控制消息
@@ -278,16 +267,16 @@ func (sc *StreamChannel) CheckDataReceiveTimeout(group *FecGroup, depacketizer *
 			//	return true
 			//}
 			//return false
-		} else if group.HeaderTemplate[0] == VideoHeader { //如果是我们的视频包
-			//expireTime := group.OosTime.Add(VideoOosExpireTime)
-			//if expireTime.Before(time.Now()) {
-			//	slog.Debug("视频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
-			//		slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
-			//		slog.Any("合计", len(group.Shards)))
-			//	depacketizer.DoNextGroup(group.HeaderSample.BlockCount)
-			//	return true
-			//}
-			return false //如果没有超过
+			//} else if group.HeaderTemplate[0] == VideoHeader { //如果是我们的视频包
+			//	//expireTime := group.OosTime.Add(VideoOosExpireTime)
+			//	//if expireTime.Before(time.Now()) {
+			//	//	slog.Debug("视频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
+			//	//		slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
+			//	//		slog.Any("合计", len(group.Shards)))
+			//	//	depacketizer.DoNextGroup(group.HeaderSample.BlockCount)
+			//	//	return true
+			//	//}
+			//	return false //如果没有超过
 		}
 		slog.Debug("帧接收超时丢弃！", slog.Int("channel", sc.ChannelId),
 			slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
@@ -344,33 +333,36 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			} else {                                                                                          //视频数据包
 				if depacketizer.StartFrameIndex != depacketizer.CurrentFrameIndex && nextGroup.Received > 0 { //重新计算当前分组的丢包情况
 					outOfSequence := false
-					seqNumber := (nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber + 1) & 0xFFFF
-					if seqNumber != uint16(nextGroup.Received) { //检查当前待处理的数据包 是否是当前分组的最大序列
+					count := (nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber + 1) & 0xFFFF
+					if count != uint16(nextGroup.Received) { //检查当前待处理的数据包 是否是当前分组的最大序列
 						outOfSequence = true
-						depacketizer.MissingPackets += seqNumber - uint16(nextGroup.Received) //计算丢帧数量
+						depacketizer.MissingPackets += count - uint16(nextGroup.Received) //计算丢帧数量
 					}
 					depacketizer.NextSequenceNumber = (nextGroup.MaxSequenceNumber + 1) & 0xFFFF //ps：这里直接跳到了最终
 					maxIdx := nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber
-					p := nextGroup.Packets[uint8(maxIdx)]
-					if p == nil {
-						slog.Debug("出意外了！！！！")
-						for i := int(maxIdx) - 1; i >= 0; i-- {
-							if p == nil {
-								p = nextGroup.Packets[uint8(i)]
-								continue
+					if int(maxIdx) > len(nextGroup.Packets) {
+						slog.Debug("数据判定逻辑产生了越界，会导致崩溃，这里捕获辅助调试！", slog.Any("start", nextGroup.StartSequenceNumber),
+							slog.Any("end", nextGroup.MaxSequenceNumber))
+					} else {
+						p := nextGroup.Packets[maxIdx]
+						if p != nil { //如果p一直为空，则等待下一次继续处理。
+							presentationTimeUs := uint64(p.Header.Timestamp) * 1000 / 90
+							if outOfSequence { //无序状态的数据，我们记录一下
+								depacketizer.LastOosFramePresentationTimestamp = presentationTimeUs //更新乱序时间
+								if !depacketizer.ReceivedOosData {                                  //接收到无序的数据了
+									depacketizer.ReceivedOosData = true
+								}
 							}
-							break
+							depacketizer.StartFrameIndex = depacketizer.CurrentFrameIndex //更新到当前帧
+						} else {
+							slog.Debug("数据包逻辑错误，意料外的空值！")
 						}
 					}
-					if p != nil { //如果p一直为空，则等待下一次继续处理。
-						presentationTimeUs := uint64(p.Header.Timestamp) * 1000 / 90
-						if outOfSequence { //无序状态的数据，我们记录一下
-							depacketizer.LastOosFramePresentationTimestamp = presentationTimeUs
-							if !depacketizer.ReceivedOosData { //接收到无序的数据了
-								depacketizer.ReceivedOosData = true
-							}
-						}
-						depacketizer.StartFrameIndex = depacketizer.CurrentFrameIndex //更新到当前帧
+				}
+				if !depacketizer.ReportedLostFrame && !depacketizer.ReceivedOosData {
+					if depacketizer.MissingPackets > uint16(header.ParityShards) {
+						sc.notifyFrameLost(packet.Header.Ssrc, depacketizer.CurrentFrameIndex, true)
+						depacketizer.ReportedLostFrame = true
 					}
 				}
 			}

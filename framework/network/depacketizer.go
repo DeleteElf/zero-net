@@ -38,12 +38,16 @@ type Depacketizer struct {
 	WaitingForIdrFrame bool
 	// 开始帧索引，用于丢包统计
 	StartFrameIndex uint32
-	// 是否已经报告丢帧
-	ReportedLostFrame bool
+	//当前收到的最大帧
+	MaxFrameIndex uint32
 	//丢包数量
 	MissingPackets uint16
+
+	// 是否已经报告丢帧
+	ReportedLostFrame bool
 	//是否收到Oos数据
-	ReceivedOosData                   bool
+	ReceivedOosData bool
+	//上个Oos数据的报告时间
 	LastOosFramePresentationTimestamp uint64
 
 	FecEncoderFactory
@@ -74,8 +78,8 @@ func (d *Depacketizer) JumpToNextIdrPacket(p *FecPacket) {
 		d.CurrentFrameIndex = p.Header.FrameIndex
 		d.CurrentBlockIndex = 0
 		d.MissingPackets = 0
-		d.ReportedLostFrame = false
-		d.ReceivedOosData = false
+		//d.ReportedLostFrame = false
+		//d.ReceivedOosData = false
 	}
 }
 
@@ -93,8 +97,8 @@ func (d *Depacketizer) JumpToNextGroup(groupId uint8) {
 		d.CurrentFrameIndex = 0 //如果有用，需要后续自己修复
 		d.CurrentBlockIndex = 0 //如果有用，需要后续自己修复
 		d.MissingPackets = 0
-		d.ReportedLostFrame = false
-		d.ReceivedOosData = false
+		//d.ReportedLostFrame = false
+		//d.ReceivedOosData = false
 	}
 }
 
@@ -103,8 +107,8 @@ func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 	d.CurrentGroupId++
 	d.CurrentBlockIndex++
 	d.MissingPackets = 0
-	d.ReportedLostFrame = false
-	d.ReceivedOosData = false
+	//d.ReportedLostFrame = false
+	//d.ReceivedOosData = false
 	if d.CurrentBlockIndex >= blockCount { //执行下一帧
 		d.CurrentBlockIndex = 0
 		d.CurrentFrameIndex++
@@ -170,11 +174,11 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 		if !group.HasParityShard && packet.Header.ShardIdx >= packet.Header.DataShards {
 			group.HasParityShard = true
 		}
-		if utils.IsBefore16(group.MaxSequenceNumber, packet.Header.SequenceNumber) {
-			group.MaxSequenceNumber = packet.Header.SequenceNumber //更新最大序列
-		}
 		if group.Received == 0 { //接收第一个计算一次就好了
 			group.StartSequenceNumber = packet.Header.SequenceNumber - uint16(packet.Header.ShardIdx)
+			group.MaxSequenceNumber = packet.Header.SequenceNumber //首个直接赋值，主要是当序列执行到  65535的一半之后，如果没有正确赋值首个，则会产生逻辑错误
+		} else if utils.IsBefore16(group.MaxSequenceNumber, packet.Header.SequenceNumber) { //非首个数据才执行判定逻辑
+			group.MaxSequenceNumber = packet.Header.SequenceNumber //更新最大序列
 		}
 		group.Received++
 		if packet.Header.GroupIdx == d.CurrentGroupId { //如果等于当前分组我们需要计算丢包率
@@ -200,11 +204,11 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 				d.LastOosFramePresentationTimestamp = presentationTimeUs
 				if !d.ReceivedOosData { //接收到无序的数据了
 					d.ReceivedOosData = true
-					//slog.Debug("进入无序状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
+					slog.Debug("进入无序状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
 				}
 			} else if d.ReceivedOosData && presentationTimeUs > d.LastOosFramePresentationTimestamp+SPECULATIVE_RFI_COOLDOWN_PERIOD_US { //从无序中恢复
 				d.ReceivedOosData = false
-				//slog.Debug("退出无序状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
+				slog.Debug("退出无序状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
 			}
 		}
 		return true

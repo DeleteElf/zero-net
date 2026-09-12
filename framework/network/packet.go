@@ -36,6 +36,7 @@ const (
 	// AudioDataTime 音频数据包的间隔时长
 	AudioDataTime = 10 * time.Millisecond
 
+	SPECULATIVE_RFI_COOLDOWN_PERIOD_MS = 300000
 	SPECULATIVE_RFI_COOLDOWN_PERIOD_US = 300000000
 )
 
