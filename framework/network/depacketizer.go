@@ -204,11 +204,11 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 				d.LastOosFramePresentationTimestamp = presentationTimeUs
 				if !d.ReceivedOosData { //接收到无序的数据了
 					d.ReceivedOosData = true
-					slog.Debug("进入无序状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
+					slog.Debug("出现乱序，退出推测性RFI状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
 				}
 			} else if d.ReceivedOosData && presentationTimeUs > d.LastOosFramePresentationTimestamp+SPECULATIVE_RFI_COOLDOWN_PERIOD_US { //从无序中恢复
 				d.ReceivedOosData = false
-				slog.Debug("退出无序状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
+				slog.Debug("恢复顺序，进入推测性RFI状态", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("groupId", d.CurrentGroupId))
 			}
 		}
 		return true
