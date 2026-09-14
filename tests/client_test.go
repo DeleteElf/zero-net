@@ -6,6 +6,7 @@ import (
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/qlog"
+	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -17,7 +18,7 @@ func receiveHandler(cli *client.Client, channelIndex int) {
 			break
 		}
 		slog.Info("正在准备接收数据", slog.Int("channel", channelIndex))
-		_, err := cli.Socket.ReceiveDataToBuffer(channelIndex)
+		_, err := cli.Socket.ReceiveDataToStreamReader(channelIndex)
 		if err != nil {
 			slog.Error("ReceiveDataToBuffer error", slog.Any("err", err))
 			return
@@ -25,10 +26,11 @@ func receiveHandler(cli *client.Client, channelIndex int) {
 		if channelIndex >= len(cli.Socket.StreamChannels) {
 			return
 		}
-		buffer := cli.Socket.StreamChannels[channelIndex].Buffer
+		buffer := cli.Socket.StreamChannels[channelIndex].BufferStream
 		if buffer != nil {
-			slog.Info("收到来自服务端的新消息", slog.Int("channel", channelIndex), slog.String("msg", string(buffer.Data)))
-			cli.Socket.StreamChannels[channelIndex].Buffer = nil
+			data, _ := io.ReadAll(buffer.Reader)
+			slog.Info("收到来自服务端的新消息", slog.Int("channel", channelIndex), slog.String("msg", string(data)))
+			cli.Socket.StreamChannels[channelIndex].BufferStream = nil
 			if channelIndex == 0 {
 				//_, _ = cli.Socket.Send(channelIndex, []byte("bye"))
 				//slog.Info("send bye", slog.Int("channel", channelIndex))

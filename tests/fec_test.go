@@ -10,6 +10,7 @@ import (
 	"github.com/klauspost/reedsolomon"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/qlog"
+	"io"
 	"log/slog"
 	"strconv"
 	"testing"
@@ -59,7 +60,7 @@ func fecMessageHandler(sock *network.Socket, channelIndex int) {
 		if sock.IsClosed {
 			break
 		}
-		_, err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
+		_, err := sock.ReceiveDataToStreamReader(channelIndex) //这个会卡住等待
 		if err != nil {
 			slog.Error(err.Error())
 			break
@@ -70,12 +71,13 @@ func fecMessageHandler(sock *network.Socket, channelIndex int) {
 		if sock.StreamChannels[channelIndex] == nil {
 			break
 		}
-		currentBuffer := sock.StreamChannels[channelIndex].Buffer
+		currentBuffer := sock.StreamChannels[channelIndex].BufferStream
 		if currentBuffer == nil {
 			break
 		}
-		sock.StreamChannels[channelIndex].Buffer = nil
-		msg := string(currentBuffer.Data)
+		sock.StreamChannels[channelIndex].BufferStream = nil
+		data, _ := io.ReadAll(currentBuffer.Reader)
+		msg := string(data)
 		slog.Debug("收到数据：", slog.Int("channelId", currentBuffer.ChannelId), slog.String("msg", msg),
 			slog.String("clientId", currentBuffer.ClientId))
 		if msg == "hello" {
