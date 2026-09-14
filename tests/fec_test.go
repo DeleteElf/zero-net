@@ -203,7 +203,7 @@ func TestFecServer(t *testing.T) {
 				} else {
 					//sock.StreamConfigs[i].SetStreamType(network.StreamType(1)) //强制启动文本的fec
 					sock.StreamConfigs[i].Type = network.StreamType(i)
-					sock.StreamConfigs[i].EnableFec = true
+					sock.StreamConfigs[i].FecEnableLevel = network.FecDepacketizeKeepRtpPacketAndSize
 					sock.StreamConfigs[i].DataShards = 4
 					sock.StreamConfigs[i].ParityShards = 2
 				}
@@ -253,7 +253,7 @@ func TestFecClient(t *testing.T) {
 			sock.StreamConfigs[i].SetStreamType(network.StreamType(i)) //设置通道媒体类型
 			sock.StreamConfigs[i].FecPacketSize = cli.FecBlockSize
 			if i == 0 {
-				sock.StreamConfigs[i].EnableFec = true
+				sock.StreamConfigs[i].FecEnableLevel = network.FecDepacketizeKeepRtpPacketAndSize
 				sock.StreamConfigs[i].DataShards = 4
 				sock.StreamConfigs[i].ParityShards = 2
 			}

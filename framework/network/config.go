@@ -8,7 +8,7 @@ type StreamConfig struct {
 	//当前流的数据业务类型
 	Type StreamType
 	//是否启用Fec功能
-	EnableFec bool
+	FecEnableLevel FecLevel
 	//数据分片，仅当上层不是标准rtp数据包时，因没有提供fecInfo才用得到，否则优先考虑rtp包内协议
 	DataShards uint8
 	//奇偶碎片，仅当上层不是标准rtp数据包时，因没有提供fecInfo才用得到，否则优先考虑rtp包内协议
@@ -36,16 +36,16 @@ func (c *StreamConfig) SetStreamType(t StreamType) {
 		c.Type = t
 		switch c.Type {
 		case Audio: //音频，默认33%
-			c.EnableFec = true
+			c.FecEnableLevel = FecDepacketizeKeepRtpData
 			c.DataShards = 4
 			c.ParityShards = 2
 		case Video: //视频，默认30%
-			c.EnableFec = true
+			c.FecEnableLevel = FecDepacketizeKeepRtpPacketAndSize
 			c.DataShards = 10
 			c.ParityShards = 3
 			break
 		default:
-			c.EnableFec = false
+			c.FecEnableLevel = FecDisabled
 			break
 		}
 	}

@@ -145,12 +145,12 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 			//case network.Video: //客户端不需要向服务端发送视频数据，这里只有心跳包
 			//	cli.StreamConfigs[i].DataShards = 10
 			//	cli.StreamConfigs[i].ParityShards = 3
-			//	cli.StreamConfigs[i].EnableFec = true
+			//	cli.StreamConfigs[i].FecLevel = true
 			//	break
 			case network.Audio: //客户端向服务端发送的所有数据里，只有音频需要fec
 				cli.StreamConfigs[i].DataShards = 4
 				cli.StreamConfigs[i].ParityShards = 2
-				cli.StreamConfigs[i].EnableFec = true
+				cli.StreamConfigs[i].FecEnableLevel = network.FecDepacketizeKeepRtpData //音频保留rtp数据即可
 			default:
 				break
 			}
@@ -188,7 +188,7 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 			_ = cli.Close()
 			return err
 		}
-		go cli.Socket.HandleChannelStreamData(i, stream)
+		go cli.Socket.HandleChannelStream(i, stream)
 	}
 	if cli.QuicConfig.EnableDatagrams && cli.SupportFec {
 		go cli.Socket.HandleChannelStreamDatagram()

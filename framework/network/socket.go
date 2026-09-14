@@ -166,12 +166,25 @@ func (s *Socket) CreateChannels() {
 	}
 }
 
-// HandleChannelStreamData 从通道接收流的数据
-func (s *Socket) HandleChannelStreamData(channelId int, stream *quic.Stream) {
-	s.StreamChannels[channelId].HandleChannelStreamData(stream)
+// HandleChannelStream 从通道接收流的数据
+func (s *Socket) HandleChannelStream(channelId int, stream *quic.Stream) {
+	s.StreamChannels[channelId].HandleStreamData(stream)
 }
 
-func (s *Socket) ReceiveDataToBuffer(channelId int) (bool, error) {
+//func (s *Socket) ReceiveDataToBuffer(channelId int) (bool, error) {
+//	if len(s.StreamChannels) == 0 {
+//		return false, errors.New("当前socket的通道数为0！")
+//	}
+//	if channelId >= s.ChannelCount {
+//		return false, errors.New("超过通道允许范围！")
+//	}
+//	if s.StreamChannels[channelId] != nil {
+//		return s.StreamChannels[channelId].ReceiveDataToBuffer(), nil
+//	}
+//	return false, errors.New("通道未初始化！")
+//}
+
+func (s *Socket) ReceiveDataToStreamReader(channelId int) (bool, error) {
 	if len(s.StreamChannels) == 0 {
 		return false, errors.New("当前socket的通道数为0！")
 	}
@@ -179,7 +192,7 @@ func (s *Socket) ReceiveDataToBuffer(channelId int) (bool, error) {
 		return false, errors.New("超过通道允许范围！")
 	}
 	if s.StreamChannels[channelId] != nil {
-		return s.StreamChannels[channelId].ReceiveDataToBuffer(), nil
+		return s.StreamChannels[channelId].ReceiveDataToStreamReader(), nil
 	}
 	return false, errors.New("通道未初始化！")
 }
@@ -196,7 +209,7 @@ func (s *Socket) Send(channelId int, data []byte) (bool, error) {
 	}
 	channel := s.StreamChannels[channelId]
 	config := s.StreamConfigs[channelId]
-	if config.EnableFec && len(data) > s.FecLimitPacketSize {
+	if config.FecEnableLevel != FecDisabled && len(data) > s.FecLimitPacketSize {
 		return s.SendFecDatagram(channelId, data)
 	} else {
 		return channel.Send(data)
@@ -260,7 +273,7 @@ func (s *Socket) HandleChannelStreamDatagram() {
 			if sc == nil {
 				return
 			}
-			if sc.Channel == nil {
+			if sc.DataStreamChannel == nil {
 				return
 			}
 			err = sc.FecDecode(packet)
@@ -274,7 +287,7 @@ func (s *Socket) HandleChannelStreamDatagram() {
 
 func (s *Socket) InitFecParam(channelId int) error {
 	config := &s.StreamConfigs[channelId]
-	if config.EnableFec {
+	if config.FecEnableLevel != FecDisabled {
 		if config.Type == Audio { //音频大约一个数据包是334大小左右，我们直接塞进一个里面
 			total := config.DataShards + config.ParityShards
 			packetizer := s.StreamChannels[channelId].Packetizers[0]
@@ -286,12 +299,15 @@ func (s *Socket) InitFecParam(channelId int) error {
 			slog.Debug("音频奇偶校验缓存已经分配！")
 			s.StreamChannels[channelId].Depacketizers[0].JumpToNextGroup(100) //音频前100个可能会比屏幕更早出来，我们直接跳过，丢弃
 		}
+		s.StreamChannels[channelId].Level = config.FecEnableLevel //传递控制级别进入
+	} else {
+		s.StreamChannels[channelId].Level = FecDisabled
 	}
 	return nil // s.StreamChannels[channelId].BuildFecEncoder()
 }
 
 func (s *Socket) UpdateFecParam(channelId int, dataShards, parityShards uint8) error {
-	if s.StreamConfigs[channelId].EnableFec && dataShards > 0 && parityShards > 0 {
+	if s.StreamConfigs[channelId].FecEnableLevel != FecDisabled && dataShards > 0 && parityShards > 0 {
 		s.StreamConfigs[channelId].DataShards = dataShards
 		s.StreamConfigs[channelId].ParityShards = parityShards
 		return nil

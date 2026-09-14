@@ -9,6 +9,7 @@ package exports
 import "C"
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/DeleteElf/zero-net/agent"
 	"github.com/DeleteElf/zero-net/client"
@@ -16,6 +17,7 @@ import (
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/DeleteElf/zero-net/server"
 	"github.com/DeleteElf/zero-net/websocket"
+	"io"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -121,7 +123,7 @@ func SetOnFrameLostCallback(callback C.FrameLostCallback) C.int {
 		return C.ErrorContext
 	}
 	for i, channel := range clientCtx.Socket.StreamChannels {
-		if clientCtx.Socket.StreamConfigs[i].EnableFec && clientCtx.Socket.StreamConfigs[i].Type == network.Video {
+		if clientCtx.Socket.StreamConfigs[i].FecEnableLevel != network.FecDisabled && clientCtx.Socket.StreamConfigs[i].Type == network.Video {
 			slog.Debug("注册帧丢失事件！")
 			channel.OnFrameLost = func(ssrc uint8, startFrameIndex uint32, endFrameIndex uint32) {
 				C.callFrameLostCallback(callback, C.int(ssrc), C.int(startFrameIndex), C.int(endFrameIndex))
@@ -275,6 +277,62 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	return C.Success
 }
 
+func socketChannelReceive(socket *network.Socket, channelId int, data *C.NetworkData) C.int {
+	if socket.IsClosed {
+		return C.Closed
+	}
+	_, err := socket.ReceiveDataToStreamReader(channelId) //这个会等待数据到达
+	if err != nil {
+		slog.Warn(err.Error())
+		return C.ErrorClose
+	}
+	if socket.IsClosed {
+		return C.Closed
+	}
+	if len(socket.StreamChannels) == 0 || socket.StreamChannels[channelId] == nil {
+		return C.Closed
+	}
+	channel := socket.StreamChannels[channelId]
+	if channel == nil {
+		return C.Closed
+	}
+
+	bufferMaxSize := int(data.len)
+	stream := channel.BufferStream
+	copySize := stream.Size - stream.Offset //拷贝大小
+	if bufferMaxSize > 0 {                  //如果上层要求指定大小
+		copySize = min(copySize, bufferMaxSize) //修改成根据缓冲区大小来读取数据
+	}
+	if copySize > 0 {
+		if bufferMaxSize > 0 { //将数据写入c++的byte[]中
+			//方案1
+			goBuf := unsafe.Slice((*byte)(unsafe.Pointer(data.ptr)), int(copySize))
+			_, err := io.ReadFull(stream.Reader, goBuf)
+			//slog.Debug("正在读取数据包", slog.Any("读取的长度", size), slog.Any("内容", goBuf))
+			if err != nil && err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
+				return C.ErrorBuffer // 读取失败
+			}
+			//方案2
+			//buffer, _ := io.ReadAll(stream.Reader)
+			//C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(&buffer[0]), C.size_t(copySize))
+
+		} else { //将整个数据提交给c++
+			buffer, err := io.ReadAll(stream.Reader)
+			if err != nil {
+				return C.ErrorBuffer
+			}
+			data.ptr = (*C.char)(unsafe.Pointer(C.CBytes(buffer)))
+		}
+		data.len = C.int(copySize)
+		stream.Offset += copySize
+	}
+	if bufferMaxSize > 0 && stream.Offset >= stream.Size && channelId < socket.ChannelCount {
+		//slog.Debug("清空流缓冲数据块", slog.Any("Offset", stream.Offset), slog.Any("Size", stream.Size), slog.Any("读取的缓存大小", bufferMaxSize))
+		channel.BufferStream = nil
+	}
+	return C.Success
+}
+
 //export ClientChannelReceive
 func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 	//基于通道的读取方式，严格按外部提供的缓存大小来操作
@@ -293,51 +351,49 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		return C.Closed
 	}
 	socket := clientCtx.Socket
-	if socket.IsClosed {
-		return C.Closed
-	}
 	channelId := int(chnIdx)
-	_, err := socket.ReceiveDataToBuffer(channelId) //这个会卡住等待
-	if err != nil {
-		slog.Warn(err.Error())
-		return C.ErrorClose
-	}
-	if clientCtx == nil {
-		return C.Closed
-	}
-	if clientCtx.IsClosed {
-		return C.Closed
-	}
-	if clientCtx.Socket == nil {
-		return C.Closed
-	}
-	if socket.IsClosed {
-		return C.Closed
-	}
-	if len(socket.StreamChannels) == 0 || socket.StreamChannels[channelId] == nil {
-		return C.Closed
-	}
-	channel := socket.StreamChannels[channelId]
-	if channel == nil {
-		return C.Closed
-	}
-	buffer := channel.Buffer
-	if buffer == nil {
-		return C.ErrorBuffer
-	}
-	//这一段的逻辑 也可以使用bufio.Reader来实现，如果是纯go，更佳，但我们需要转C，自己实现的逻辑性能更佳
-	bufferSize := len(buffer.Data)
-	bufferMaxSize := int(data.len)
-	copySize := min(bufferSize-buffer.Offset, bufferMaxSize) //修改成根据缓冲区大小来读取数据
-	if copySize > 0 {
-		C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(&buffer.Data[buffer.Offset]), C.size_t(copySize))
-		data.len = C.int(copySize)
-		buffer.Offset += copySize
-	}
-	if buffer.Offset >= bufferSize && channelId < socket.ChannelCount {
-		channel.Buffer = nil
-	}
-	return C.Success
+	return socketChannelReceive(socket, channelId, data)
+	//_, err := socket.ReceiveDataToBuffer(channelId) //这个会卡住等待
+	//if err != nil {
+	//	slog.Warn(err.Error())
+	//	return C.ErrorClose
+	//}
+	//if clientCtx == nil {
+	//	return C.Closed
+	//}
+	//if clientCtx.IsClosed {
+	//	return C.Closed
+	//}
+	//if clientCtx.Socket == nil {
+	//	return C.Closed
+	//}
+	//if socket.IsClosed {
+	//	return C.Closed
+	//}
+	//if len(socket.StreamChannels) == 0 || socket.StreamChannels[channelId] == nil {
+	//	return C.Closed
+	//}
+	//channel := socket.StreamChannels[channelId]
+	//if channel == nil {
+	//	return C.Closed
+	//}
+	//buffer := channel.Buffer
+	//if buffer == nil {
+	//	return C.ErrorBuffer
+	//}
+	////这一段的逻辑 也可以使用bufio.Reader来实现，如果是纯go，更佳，但我们需要转C，自己实现的逻辑性能更佳
+	//bufferSize := len(buffer.Data)
+	//bufferMaxSize := int(data.len)
+	//copySize := min(bufferSize-buffer.Offset, bufferMaxSize) //修改成根据缓冲区大小来读取数据
+	//if copySize > 0 {
+	//	C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(&buffer.Data[buffer.Offset]), C.size_t(copySize))
+	//	data.len = C.int(copySize)
+	//	buffer.Offset += copySize
+	//}
+	//if buffer.Offset >= bufferSize && channelId < socket.ChannelCount {
+	//	channel.Buffer = nil
+	//}
+	//return C.Success
 }
 
 //export ClientChannelSend
@@ -518,7 +574,8 @@ func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int
 	return C.Closed
 }
 
-var currentBuffer *network.StreamChannelData
+// var currentBuffer *network.StreamChannelData
+var currentStream *network.DataStream
 
 //export ServerSocketReceive
 func ServerSocketReceive(data *C.ClientData) C.int {
@@ -539,7 +596,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		}
 		break //正式工作
 	}
-	if currentBuffer == nil {
+	if currentStream == nil {
 		count := 0
 		for _, sock := range socketMap {
 			count += sock.ChannelCount
@@ -549,7 +606,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		for _, sock := range socketMap {
 			for i := 0; i < sock.ChannelCount; i++ {
 				channelCaseList[index] = reflect.SelectCase{Dir: reflect.SelectRecv,
-					Chan: reflect.ValueOf(sock.StreamChannels[i].Channel)}
+					Chan: reflect.ValueOf(sock.StreamChannels[i].DataStreamChannel)}
 				index++
 			}
 		}
@@ -558,36 +615,66 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 			if !ok {
 				return C.ErrorClose
 			}
-			buffer := value.Interface().(network.StreamChannelData)
-			currentBuffer = &buffer
+			stream := value.Interface().(network.DataStream)
+			currentStream = &stream
 		} else {
 			slog.Debug("获取到的通道数量为0！")
 			return C.ErrorBuffer
 		}
 	}
-	if len(currentBuffer.Data) == 0 {
+	if currentStream.Size == 0 {
 		slog.Debug("获取到缓存大小异常")
 		return C.ErrorBuffer
 	}
-	data.index = C.int(currentBuffer.ChannelId)
-	data.id = C.CString(currentBuffer.ClientId)
-
-	bufferSize := len(currentBuffer.Data)
+	data.index = C.int(currentStream.ChannelId)
+	data.id = C.CString(currentStream.ClientId)
 	bufferMaxSize := int(data.len)
-	if bufferMaxSize == -1 { //为支持零拷贝，这里提供外部提供-1缓冲区长度的支持
-		bufferMaxSize = bufferSize
-		copySize := min(bufferSize-currentBuffer.Offset, bufferMaxSize) //考虑到外部输入可能书写不严谨，零拷贝支持提供剩余的缓存
-		data.ptr = (*C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&currentBuffer.Data[0])) + uintptr(currentBuffer.Offset)))
-		data.len = C.int(copySize)
-	} else {
-		copySize := min(bufferSize-currentBuffer.Offset, bufferMaxSize) //修改成根据缓冲区大小来读取数据
-		C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(uintptr(unsafe.Pointer(&currentBuffer.Data[0]))+uintptr(currentBuffer.Offset)), C.size_t(copySize))
-		data.len = C.int(copySize)
+	copySize := currentStream.Size - currentStream.Offset //拷贝大小
+	if bufferMaxSize > 0 {                                //如果上层要求指定大小
+		//if copySize > bufferMaxSize { //如果需要分多次读取，我们才需要缓存
+		//	if channel.Depacketizers[reader.Ssrc] == nil { //不走fec解包时，没有解包器
+		//		channel.BufferStream = reader
+		//	} else {
+		//		channel.Depacketizers[reader.Ssrc].BufferStream = reader
+		//	}
+		//}
+		copySize = min(copySize, bufferMaxSize) //修改成根据缓冲区大小来读取数据
 	}
-	currentBuffer.Offset += int(data.len)
-	if currentBuffer.Offset >= bufferSize {
-		currentBuffer = nil
+	if bufferMaxSize > 0 { //将数据写入c++的byte[]中
+		goBuf := unsafe.Slice((*byte)(unsafe.Pointer(data.ptr)), int(copySize))
+		_, err := io.ReadFull(currentStream.Reader, goBuf)
+		if err != nil && err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return C.ErrorBuffer // 读取失败
+		}
+		//C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(&buffer.Data[buffer.Offset]), C.size_t(copySize))
+	} else { //将整个数据提交给c++
+		buffer, err := io.ReadAll(currentStream.Reader)
+		if err != nil {
+			return C.ErrorBuffer
+		}
+		data.ptr = (*C.char)(unsafe.Pointer(C.CBytes(buffer)))
 	}
+	data.len = C.int(copySize)
+	currentStream.Offset += copySize
+	if bufferMaxSize > 0 && currentStream.Offset >= currentStream.Size {
+		currentStream = nil
+	}
+
+	//bufferSize := len(currentBuffer.Data)
+	//if bufferMaxSize == -1 { //为支持零拷贝，这里提供外部提供-1缓冲区长度的支持
+	//	bufferMaxSize = bufferSize
+	//	copySize := min(bufferSize-currentBuffer.Offset, bufferMaxSize) //考虑到外部输入可能书写不严谨，零拷贝支持提供剩余的缓存
+	//	data.ptr = (*C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&currentBuffer.Data[0])) + uintptr(currentBuffer.Offset)))
+	//	data.len = C.int(copySize)
+	//} else {
+	//	copySize := min(bufferSize-currentBuffer.Offset, bufferMaxSize) //修改成根据缓冲区大小来读取数据
+	//	C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(uintptr(unsafe.Pointer(&currentBuffer.Data[0]))+uintptr(currentBuffer.Offset)), C.size_t(copySize))
+	//	data.len = C.int(copySize)
+	//}
+	//currentBuffer.Offset += int(data.len)
+	//if currentBuffer.Offset >= bufferSize {
+	//	currentBuffer = nil
+	//}
 	return C.Success
 }
 
@@ -609,36 +696,38 @@ func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkD
 		return C.ErrorSocket
 	}
 	channelIndex := int(chnIdx)
-	_, err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
-	if err != nil {
-		slog.Warn(err.Error())
-		return C.ErrorClose
-	}
-	if sock.IsClosed { //优化如果过程中断开后继续
-		return C.Closed
-	}
-	if channelIndex >= sock.ChannelCount { //到这边说明是已经关闭了
-		return C.Closed
-	}
-	buffer := sock.StreamChannels[channelIndex].Buffer
-	//*chnIdx = C.int(currentBuffer.ChannelId)
-	bufferSize := len(buffer.Data)
-	bufferMaxSize := int(data.len)
-	if bufferMaxSize == -1 { //为支持零拷贝，这里提供外部提供-1缓冲区长度的支持
-		bufferMaxSize = bufferSize
-		copySize := min(bufferSize-buffer.Offset, bufferMaxSize) //考虑到外部输入可能书写不严谨，零拷贝支持提供剩余的缓存
-		data.ptr = (*C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&buffer.Data[0])) + uintptr(buffer.Offset)))
-		data.len = C.int(copySize)
-	} else {
-		copySize := min(bufferSize-buffer.Offset, bufferMaxSize) //修改成根据缓冲区大小来读取数据
-		C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(uintptr(unsafe.Pointer(&buffer.Data[0]))+uintptr(buffer.Offset)), C.size_t(copySize))
-		data.len = C.int(copySize)
-	}
-	buffer.Offset += int(data.len)
-	if buffer.Offset >= bufferSize {
-		sock.StreamChannels[channelIndex].Buffer = nil
-	}
-	return C.Success
+	return socketChannelReceive(sock, channelIndex, data)
+	//
+	//_, err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
+	//if err != nil {
+	//	slog.Warn(err.Error())
+	//	return C.ErrorClose
+	//}
+	//if sock.IsClosed { //优化如果过程中断开后继续
+	//	return C.Closed
+	//}
+	//if channelIndex >= sock.ChannelCount { //到这边说明是已经关闭了
+	//	return C.Closed
+	//}
+	//buffer := sock.StreamChannels[channelIndex].Buffer
+	////*chnIdx = C.int(currentBuffer.ChannelId)
+	//bufferSize := len(buffer.Data)
+	//bufferMaxSize := int(data.len)
+	//if bufferMaxSize == -1 { //为支持零拷贝，这里提供外部提供-1缓冲区长度的支持
+	//	bufferMaxSize = bufferSize
+	//	copySize := min(bufferSize-buffer.Offset, bufferMaxSize) //考虑到外部输入可能书写不严谨，零拷贝支持提供剩余的缓存
+	//	data.ptr = (*C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&buffer.Data[0])) + uintptr(buffer.Offset)))
+	//	data.len = C.int(copySize)
+	//} else {
+	//	copySize := min(bufferSize-buffer.Offset, bufferMaxSize) //修改成根据缓冲区大小来读取数据
+	//	C.memcpy(unsafe.Pointer(data.ptr), unsafe.Pointer(uintptr(unsafe.Pointer(&buffer.Data[0]))+uintptr(buffer.Offset)), C.size_t(copySize))
+	//	data.len = C.int(copySize)
+	//}
+	//buffer.Offset += int(data.len)
+	//if buffer.Offset >= bufferSize {
+	//	sock.StreamChannels[channelIndex].Buffer = nil
+	//}
+	//return C.Success
 }
 
 //region 代理相关

@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+type FecLevel int
+
+const (
+	// FecDisabled 关闭Fec编解码支持
+	FecDisabled FecLevel = iota
+	// FecDepacketizeKeepRtpPacketAndSize 保留RtpPacket结构和大小，仅执行fec修复
+	FecDepacketizeKeepRtpPacketAndSize
+	// FecDepacketizeKeepRtpPacket 保留RtpPacket结构，除了执行fec修复外，会执行解包，将整个block分块数据拼接成大数据包,这个模式会修改rtp的数据格式
+	//FecDepacketizeKeepRtpPacket
+
+	// FecDepacketizeKeepRtpData 去掉Rtp数据包结构，仅保留拼接好的视频编码数据,与 reedsolomon 配合性能最佳，不需要恢复rtp结构
+	FecDepacketizeKeepRtpData
+)
+
 // FecGroup 用于收集和组装同一 GroupID 的分片
 type FecGroup struct {
 	HeaderSample    *FecPacketHeader
@@ -50,6 +64,8 @@ type Depacketizer struct {
 	//上个Oos数据的报告时间
 	LastOosFramePresentationTimestamp uint64
 
+	//关键帧是否已经处理
+	IdrFrameProcessed bool
 	FecEncoderFactory
 }
 
@@ -103,13 +119,15 @@ func (d *Depacketizer) JumpToNextGroup(groupId uint8) {
 }
 
 func (d *Depacketizer) DoNextGroup(blockCount uint8) {
-	delete(d.Groups, d.CurrentGroupId)
 	d.CurrentGroupId++
 	d.CurrentBlockIndex++
 	d.MissingPackets = 0
 	//d.ReportedLostFrame = false
 	//d.ReceivedOosData = false
 	if d.CurrentBlockIndex >= blockCount { //执行下一帧
+		for i := 0; i < int(d.CurrentBlockIndex); i++ { //删除当前帧的缓存
+			delete(d.Groups, d.CurrentGroupId-uint8(i))
+		}
 		d.CurrentBlockIndex = 0
 		d.CurrentFrameIndex++
 	}
@@ -216,7 +234,7 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 	return false
 }
 
-//func (d *Depacketizer) Decode(sc *StreamChannel, p *FecPacket) error {
+//func (d *Depacketizer) Decode(sc *DataStreamChannel, p *FecPacket) error {
 //	//slog.Debug("fec开始解包", slog.Any("channel id", sc.ChannelId), slog.Any("ssrc", p.Header.Ssrc), slog.Any("groupId", p.Header.GroupIdx))
 //	totalShards := p.Header.DataShards + p.Header.ParityShards
 //	if p.Header.ShardIdx >= totalShards {

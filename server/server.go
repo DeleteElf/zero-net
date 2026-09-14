@@ -221,7 +221,7 @@ func (s *Server) processStream(quicConn *quic.Conn, stream *quic.Stream, onDisco
 	if err != nil {
 		return
 	}
-	go socket.HandleChannelStreamData(info.ChannelIndex, stream)
+	go socket.HandleChannelStream(info.ChannelIndex, stream)
 }
 func (s *Server) CloseSocket(id string) error {
 	s.lock.Lock()
