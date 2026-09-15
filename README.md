@@ -26,3 +26,12 @@
 ```
 
 2. go在生成dll时，会自动将导出目录下的所有api都生成.h的文件内，我们通过引用的方式加入
+
+
+3. windows 下qt使用msvc无法断点go编译生成的dll的问题
+```text
+可以参考本项目的build-debug.bat
+1，下载https://github.com/rainers/cv2pdb
+2，编译dll时，不要使用 -ldflags="-s -w"
+3，使用cv2pdb利用生成的dll，生成pdb文件，用于调试，跟dll放一起即可。
+```

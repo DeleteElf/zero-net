@@ -22,7 +22,6 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
-	"runtime/debug"
 	"strings"
 	"time"
 	"unsafe"
@@ -55,10 +54,11 @@ var logCallback C.MessageCallback
 
 // SafeWrapper 捕捉 Panic 并将带有具体行号的 Stack Trace 写入日志
 func SafeWrapper() {
-	if r := recover(); r != nil {
-		stackInfo := fmt.Sprintf("=== Go DLL Panic Captured ===\nError: %v\nStack Trace:\n%s\n=============================\n", r, string(debug.Stack()))
-		slog.Error(stackInfo)
-	}
+	//没有致命问题时，不需要执行这个！！！
+	//if r := recover(); r != nil {
+	//	stackInfo := fmt.Sprintf("=== Go DLL Panic Captured ===\nError: %v\nStack Trace:\n%s\n=============================\n", r, string(debug.Stack()))
+	//	slog.Error(stackInfo)
+	//}
 }
 
 //export InitLogCallback
