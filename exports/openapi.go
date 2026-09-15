@@ -306,9 +306,11 @@ func socketChannelReceive(ctx framework.Closeable, socket *network.Socket, chann
 	if channel == nil {
 		return C.Closed
 	}
-
-	bufferMaxSize := int(data.len)
 	stream := channel.BufferStream
+	if stream == nil {
+		return C.ErrorBuffer
+	}
+	bufferMaxSize := int(data.len)
 	copySize := stream.Size - stream.Offset //拷贝大小
 	if bufferMaxSize > 0 {                  //如果上层要求指定大小
 		copySize = min(copySize, bufferMaxSize) //修改成根据缓冲区大小来读取数据
