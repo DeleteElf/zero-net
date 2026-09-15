@@ -370,7 +370,7 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		result.Header.SequenceNumber = binary.BigEndian.Uint16(data[2:])
 		result.Header.Timestamp = binary.BigEndian.Uint32(data[4:])
 		result.Header.GroupIdx = data[16] //  uint64(binary.BigEndian.Uint32(data[16:]))
-		result.Header.FrameIndex = binary.BigEndian.Uint32(data[20:])
+		result.Header.FrameIndex = binary.LittleEndian.Uint32(data[20:])
 		//(blockIndex << 4) | ((fec_blocks_needed - 1) << 6);
 		result.Header.BlockCount = (data[27] >> 6) + 1
 		result.Header.BlockIdx = data[27] >> 4 & 0x3
