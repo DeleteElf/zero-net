@@ -365,7 +365,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 				if sc.CheckDataReceiveTimeout(nextGroup, depacketizer) {
 					continue
 				}
-			} else { //视频数据包
+			} else {                                                                                          //视频数据包
 				if depacketizer.StartFrameIndex != depacketizer.CurrentFrameIndex && nextGroup.Received > 0 { //重新计算当前分组的丢包情况
 					outOfSequence := false
 					count := (nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber + 1) & 0xFFFF
@@ -497,8 +497,12 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 					} else { //清除fecPercentage的数据
 						resultData = nextGroup.Packets[i].Payload //直接使用原始数据包，实现零拷贝
 					}
-					oldFecInfo := binary.LittleEndian.Uint32(resultData[28:])
-					binary.LittleEndian.PutUint32(resultData[28:32], oldFecInfo&^(0x7F<<4))
+					if len(resultData) >= 32 {
+						oldFecInfo := binary.LittleEndian.Uint32(resultData[28:])
+						binary.LittleEndian.PutUint32(resultData[28:32], oldFecInfo&^(0x7F<<4))
+					} else {
+						slog.Warn("数据包长度不足，跳过位标志清除", slog.Int("len", len(resultData)))
+					}
 					//slog.Debug("正在处理视频数据包", slog.Any("ssrc", nextGroup.HeaderSample.Ssrc), slog.Int("数据长度", len(resultData)),
 					//	slog.Any("内容", resultData))
 					sc.handleReaderToChannel(nextGroup.HeaderSample.Ssrc, bytes.NewReader(resultData), len(resultData))

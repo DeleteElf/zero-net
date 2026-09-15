@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"time"
 	"unsafe"
@@ -52,8 +53,17 @@ func (logCallbackWriter) Write(p []byte) (n int, err error) {
 
 var logCallback C.MessageCallback
 
+// SafeWrapper 捕捉 Panic 并将带有具体行号的 Stack Trace 写入日志
+func SafeWrapper() {
+	if r := recover(); r != nil {
+		stackInfo := fmt.Sprintf("=== Go DLL Panic Captured ===\nError: %v\nStack Trace:\n%s\n=============================\n", r, string(debug.Stack()))
+		slog.Error(stackInfo)
+	}
+}
+
 //export InitLogCallback
 func InitLogCallback(level C.int, callback C.MessageCallback) {
+	defer SafeWrapper()
 	g_log_level = int(level)
 	slogLevel := slog.LevelInfo
 	switch level {
@@ -74,6 +84,7 @@ func InitLogCallback(level C.int, callback C.MessageCallback) {
 
 //export InitNetwork
 func InitNetwork() C.int {
+	defer SafeWrapper()
 	slog.Info("log", slog.Int("level", g_log_level))
 	if g_log_level < 0 {
 		utils.InitLog(slog.LevelDebug, nil)
@@ -87,6 +98,7 @@ var onAcceptSocket C.MessageCallback
 
 //export SetOnAcceptSocketCallback
 func SetOnAcceptSocketCallback(callback C.MessageCallback) C.int {
+	defer SafeWrapper()
 	if onAcceptSocket != nil && callback != nil {
 		return C.ErrorParam
 	}
@@ -102,6 +114,7 @@ var onDisConnected C.MessageCallback
 
 //export SetOnDisConnectedCallback
 func SetOnDisConnectedCallback(callback C.MessageCallback) C.int {
+	defer SafeWrapper()
 	if onDisConnected != nil && callback != nil {
 		return C.ErrorParam
 	}
@@ -115,6 +128,7 @@ func SetOnDisConnectedCallback(callback C.MessageCallback) C.int {
 
 //export SetOnFrameLostCallback
 func SetOnFrameLostCallback(callback C.FrameLostCallback) C.int {
+	defer SafeWrapper()
 	if clientCtx == nil {
 		slog.Warn("请先创建客户端实例！")
 		return C.ErrorContext
@@ -136,6 +150,7 @@ func SetOnFrameLostCallback(callback C.FrameLostCallback) C.int {
 
 //export ClientClose
 func ClientClose() C.int {
+	defer SafeWrapper()
 	if clientCtx == nil {
 		//slog.Warn("未检索到有效的客户端！")
 		return C.ErrorContext
@@ -147,6 +162,7 @@ func ClientClose() C.int {
 
 //export ClientConnect
 func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
+	defer SafeWrapper()
 	if config == nil {
 		return C.ErrorParam
 	}
@@ -347,6 +363,7 @@ func socketChannelReceive(ctx framework.Closeable, socket *network.Socket, chann
 
 //export ClientChannelReceive
 func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
+	defer SafeWrapper()
 	//基于通道的读取方式，严格按外部提供的缓存大小来操作
 	if data == nil {
 		return C.ErrorParam
@@ -410,6 +427,7 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 
 //export ClientChannelSend
 func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
+	defer SafeWrapper()
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -430,6 +448,7 @@ func ClientChannelSend(chnIdx C.int, data *C.NetworkData) C.int {
 
 //export ClientChannelClose
 func ClientChannelClose(chnIdx C.int) C.int {
+	defer SafeWrapper()
 	if clientCtx == nil {
 		//slog.Warn("未检索到有效的客户端！")
 		return C.ErrorContext
@@ -453,6 +472,7 @@ func ClientChannelClose(chnIdx C.int) C.int {
 
 //export ServerCreate
 func ServerCreate(config *C.NetworkData) C.int {
+	defer SafeWrapper()
 	if config == nil {
 		return C.ErrorParam
 	}
@@ -511,6 +531,7 @@ func ServerCreate(config *C.NetworkData) C.int {
 
 //export ServerClose
 func ServerClose() C.int {
+	defer SafeWrapper()
 	onAcceptSocket = nil
 	socketMap = make(map[string]*network.Socket) //清空map
 	if managerCtx != nil {
@@ -526,6 +547,7 @@ func ServerClose() C.int {
 
 //export ServerStartListen
 func ServerStartListen() C.int {
+	defer SafeWrapper()
 	if serverCtx == nil {
 		slog.Warn("未检测到有效的服务上下文！")
 		return C.ErrorContext
@@ -542,6 +564,7 @@ func ServerStartListen() C.int {
 
 //export ServerSocketClose
 func ServerSocketClose(clientId *C.char) C.int {
+	defer SafeWrapper()
 	if serverCtx == nil {
 		slog.Warn("未检测到有效的服务上下文！")
 		return C.ErrorContext
@@ -561,6 +584,7 @@ func ServerSocketClose(clientId *C.char) C.int {
 
 //export ServerSocketSend
 func ServerSocketSend(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int {
+	defer SafeWrapper()
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -591,6 +615,7 @@ var currentStream *network.DataStream
 
 //export ServerSocketReceive
 func ServerSocketReceive(data *C.ClientData) C.int {
+	defer SafeWrapper()
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -683,6 +708,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 
 //export ServerSocketChannelReceive
 func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkData) C.int {
+	defer SafeWrapper()
 	if data == nil {
 		return C.ErrorParam
 	}
@@ -737,6 +763,7 @@ func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkD
 
 //export ProxyServerCreate
 func ProxyServerCreate(config *C.NetworkData) C.int {
+	defer SafeWrapper()
 	if config == nil {
 		return C.ErrorParam
 	}
@@ -799,6 +826,7 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 
 //export ProxyServerSocketClose
 func ProxyServerSocketClose(clientId *C.char) C.int {
+	defer SafeWrapper()
 	if managerCtx == nil {
 		slog.Warn("未检测到有效的服务上下文！")
 		return C.ErrorContext
@@ -827,12 +855,14 @@ var websocketClient *websocket.Client
 
 //export WebSocketCreate
 func WebSocketCreate() C.int {
+	defer SafeWrapper()
 	websocketClient = websocket.NewClient()
 	return C.Success
 }
 
 //export WebSocketConnect
 func WebSocketConnect(config *C.NetworkData) C.int {
+	defer SafeWrapper()
 	if config == nil {
 		return C.ErrorParam
 	}
@@ -854,6 +884,7 @@ func WebSocketConnect(config *C.NetworkData) C.int {
 
 //export WebSocketClose
 func WebSocketClose() C.int {
+	defer SafeWrapper()
 	if websocketClient != nil {
 		_ = websocketClient.Close()
 		websocketClient = nil
@@ -863,6 +894,7 @@ func WebSocketClose() C.int {
 
 //export WebSocketSend
 func WebSocketSend(msg *C.char) C.int {
+	defer SafeWrapper()
 	if websocketClient != nil && !websocketClient.IsClosed() {
 		_ = websocketClient.Send(C.GoString(msg))
 		return C.Success
@@ -872,6 +904,7 @@ func WebSocketSend(msg *C.char) C.int {
 
 //export SetOnWebSocketMessageCallback
 func SetOnWebSocketMessageCallback(callback C.MessageCallback) {
+	defer SafeWrapper()
 	if websocketClient != nil {
 		websocketClient.OnMessage = func(msg string) {
 			data, err := utils.GetJsonObject([]byte(msg))
@@ -927,6 +960,7 @@ func SetOnWebSocketMessageCallback(callback C.MessageCallback) {
 
 //export SetOnWebSocketConnectedCallback
 func SetOnWebSocketConnectedCallback(callback C.MessageCallback) {
+	defer SafeWrapper()
 	if websocketClient != nil {
 		websocketClient.OnConnected = func(msg string) {
 			if callback != nil {
@@ -938,6 +972,7 @@ func SetOnWebSocketConnectedCallback(callback C.MessageCallback) {
 
 //export SetOnWebSocketDisconnectedCallback
 func SetOnWebSocketDisconnectedCallback(callback C.MessageCallback) {
+	defer SafeWrapper()
 	if websocketClient != nil {
 		websocketClient.OnDisconnected = func(msg string) {
 			if callback != nil {
