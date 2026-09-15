@@ -365,7 +365,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 				if sc.CheckDataReceiveTimeout(nextGroup, depacketizer) {
 					continue
 				}
-			} else {                                                                                          //视频数据包
+			} else { //视频数据包
 				if depacketizer.StartFrameIndex != depacketizer.CurrentFrameIndex && nextGroup.Received > 0 { //重新计算当前分组的丢包情况
 					outOfSequence := false
 					count := (nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber + 1) & 0xFFFF
@@ -403,9 +403,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			}
 			break // 无论音频还是视频，数据未凑齐前退出循环，等待下一个 UDP 包
 		}
-		if header.Idr == 1 {
-			slog.Debug("正在执行关键帧解码！", slog.Any("ssrc", header.Ssrc), slog.Any("目标帧", header.FrameIndex))
-		}
+
 		//事实证明数据凑齐了：检查是否打脸了之前的 推测的 RFI 误报
 		if depacketizer.ReportedLostFrame && !depacketizer.ReceivedOosData { //如果报告了丢帧，但是又恢复了有序，则表示误报
 			// 如果事实证明我们对主办方撒了谎，那就暂时停止进一步的推测性信息请求（RFI）。
@@ -443,11 +441,9 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			//slog.Debug("执行Fec解包逻辑", slog.Any("groupId", header.GroupIdx))
 		}
 		//暂时只支持97和127的音频
-		if nextGroup.HeaderTemplate[0] == RtpHeader && (nextGroup.HeaderTemplate[1] == 0x61 || nextGroup.HeaderTemplate[1] == 0x7f) {
+		if nextGroup.HeaderTemplate[0] == RtpHeader && (nextGroup.HeaderTemplate[1] == AudioHeader || nextGroup.HeaderTemplate[1] == AudioDynamicHeader) {
 			sc.processAudioPacket(nextGroup)
-		}
-		//暂时只支持 0x90的格式
-		if nextGroup.HeaderTemplate[0] == VideoHeader { //如果是rtp包
+		} else if nextGroup.HeaderTemplate[0] == VideoHeader { //如果是rtp包 //暂时只支持 0x90的格式
 			//这里可以根据特性进行拼接数据,如果考虑尽量零拷贝处理next.Shards
 			//现在这里有几个问题：
 			//1，我需要补充没有到的正规rtp 包的头信息 ，假设 一共6个数据包，数据分片是4个，当前到达的索引是 0,1,3,4，那么则需要补充序号是2的rtp头
@@ -508,6 +504,10 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 					sc.handleReaderToChannel(nextGroup.HeaderSample.Ssrc, bytes.NewReader(resultData), len(resultData))
 				}
 			default:
+			}
+			if header.Idr == 1 {
+				slog.Debug("关键帧解码完成，向服务器发送ltr_ack！", slog.Any("ssrc", header.Ssrc), slog.Any("目标帧", header.FrameIndex))
+				sc.connectionReceivedCompleteFrame(header.Ssrc, header.FrameIndex, true)
 			}
 			//slog.Debug("fec完成重组", slog.Any("channel id", sc.ChannelId), slog.Any("groupId", header.GroupIdx))
 		} else {

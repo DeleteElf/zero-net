@@ -110,7 +110,7 @@ type AudioFecPacket struct {
 // return 返回构建好的新数据包
 func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte {
 	dataLength := len(data)
-	if header[1] == 0x61 || header[1] == 0x7f {
+	if header[1] == AudioHeader || header[1] == AudioDynamicHeader {
 		total := RtpHeaderLength + dataLength
 		buffer := make([]byte, total)               //循环中，且释放时机不好确定，不使用sync.Pool
 		copy(buffer[0:], header[0:RtpHeaderLength]) //仅拷贝加入rtp包即可
@@ -118,7 +118,7 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 			copy(buffer[RtpHeaderLength:], data)
 		}
 		switch header[1] {
-		case 0x61: //标准音频
+		case AudioHeader: //标准音频
 			sequenceNumber := binary.BigEndian.Uint16(buffer[2:])
 			offset := uint16(shardIndex) - sequenceNumber%uint16(dataShards)
 			sequenceNumber = sequenceNumber + offset
@@ -130,8 +130,8 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 			}
 			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber) //计算当前的包位置
 			binary.BigEndian.PutUint32(buffer[4:], timestamp)
-		case 0x7f: //动态音频
-			buffer[1] = 0x61 //通过动态音频获取的 packetType为127，我们需要修改成97
+		case AudioDynamicHeader: //动态音频
+			buffer[1] = AudioHeader //通过动态音频获取的 packetType为127，我们需要修改成97
 			sequenceNumber := binary.BigEndian.Uint16(buffer[14:])
 			//offset := uint16(shardIndex) - uint16(dataShards) + 1 //计算出偏移量
 			//时间使用的是最后一帧的时间，我们需要计算出正确的时间

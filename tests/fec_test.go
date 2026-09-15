@@ -87,7 +87,7 @@ func fecMessageHandler(sock *network.Socket, channelIndex int) {
 				for j := 0; j < 5; j++ {
 					for i := 0; i < 4; i++ {
 						buffer[0] = network.RtpHeader
-						buffer[1] = 0x61
+						buffer[1] = network.AudioHeader
 						binary.BigEndian.PutUint16(buffer[2:], uint16(j*4+i))
 						binary.BigEndian.PutUint32(buffer[4:], time)
 						time += 5
