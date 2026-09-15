@@ -2,6 +2,53 @@ package network
 
 import (
 	"github.com/quic-go/quic-go"
+	"time"
+)
+
+const (
+	FecPacketHeaderLength = 26
+	// FecLimitPacketSize 我们传输音频包 48000质量的 opus 最小是60+12的rtp数据包，因此默认限制一下70
+	FecLimitPacketSize       = 70
+	NetMtuPacketSize         = 1400
+	VideoHeaderLength        = 32
+	AudioHeaderLength        = 24
+	RtpHeaderLength          = 12
+	NvidiaPacketHeaderLength = 16
+	// RtpHeader 普通rtp标准头
+	RtpHeader = 0x80
+	// RtpHeaderFlagExtension rtp头携带了扩展的信息
+	RtpHeaderFlagExtension = 0x10
+	// VideoHeader rtp头携带扩展信息后的头信息
+	VideoHeader        = RtpHeader | RtpHeaderFlagExtension
+	AudioHeader        = 97
+	AudioDynamicHeader = 127
+
+	CustomFecHeader   = 0x81
+	CustomMessageType = 0x11
+
+	MessageExpireTime  = 200 * time.Millisecond
+	AudioExpireTime    = 100 * time.Millisecond
+	VideoExpireTime    = 100 * time.Millisecond
+	AudioOosExpireTime = 100 * time.Millisecond
+	VideoOosExpireTime = 500 * time.Millisecond
+	// AudioDataTime 音频数据包的间隔时长
+	AudioDataTime = 10 * time.Millisecond
+
+	SPECULATIVE_RFI_COOLDOWN_PERIOD_MS = 300000
+	SPECULATIVE_RFI_COOLDOWN_PERIOD_US = 300000000
+)
+
+type FecLevel int
+
+const (
+	// FecDisabled 关闭Fec编解码支持
+	FecDisabled FecLevel = iota
+	// FecDepacketizeKeepRtpPacketAndSize 保留RtpPacket结构和大小，仅执行fec修复
+	FecDepacketizeKeepRtpPacketAndSize
+	// FecDepacketizeKeepRtpPacket 保留RtpPacket结构，除了执行fec修复外，会执行解包，将整个block分块数据拼接成大数据包,这个模式会修改rtp的数据格式
+	FecDepacketizeKeepRtpPacket
+	// FecDepacketizeKeepRtpData 去掉Rtp数据包结构，仅保留拼接好的视频编码数据,与 reedsolomon 配合性能最佳，不需要恢复rtp结构
+	FecDepacketizeKeepRtpData
 )
 
 type StreamConfig struct {
@@ -35,7 +82,7 @@ func (c *StreamConfig) SetStreamType(t StreamType) {
 	if c.Type != t {
 		c.Type = t
 		switch c.Type {
-		case Audio: //音频，默认33%
+		case Audio: //音频，默认50%
 			c.FecEnableLevel = FecDepacketizeKeepRtpData
 			c.DataShards = 4
 			c.ParityShards = 2

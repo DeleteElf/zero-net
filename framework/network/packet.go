@@ -7,39 +7,6 @@ import (
 	"time"
 )
 
-const (
-	FecPacketHeaderLength = 26
-	// FecLimitPacketSize 我们传输音频包 48000质量的 opus 最小是60+12的rtp数据包，因此默认限制一下70
-	FecLimitPacketSize       = 70
-	NetMtuPacketSize         = 1400
-	VideoHeaderLength        = 32
-	AudioHeaderLength        = 24
-	RtpHeaderLength          = 12
-	NvidiaPacketHeaderLength = 16
-	// RtpHeader 普通rtp标准头
-	RtpHeader = 0x80
-	// RtpHeaderFlagExtension rtp头携带了扩展的信息
-	RtpHeaderFlagExtension = 0x10
-	// VideoHeader rtp头携带扩展信息后的头信息
-	VideoHeader        = RtpHeader | RtpHeaderFlagExtension
-	AudioHeader        = 97
-	AudioDynamicHeader = 127
-
-	CustomFecHeader   = 0x81
-	CustomMessageType = 0x11
-
-	MessageExpireTime  = 200 * time.Millisecond
-	AudioExpireTime    = 100 * time.Millisecond
-	VideoExpireTime    = 100 * time.Millisecond
-	AudioOosExpireTime = 100 * time.Millisecond
-	VideoOosExpireTime = 500 * time.Millisecond
-	// AudioDataTime 音频数据包的间隔时长
-	AudioDataTime = 10 * time.Millisecond
-
-	SPECULATIVE_RFI_COOLDOWN_PERIOD_MS = 300000
-	SPECULATIVE_RFI_COOLDOWN_PERIOD_US = 300000000
-)
-
 type FrameLostControlPacket struct {
 	TrackIndex int
 	StartFrame uint32

@@ -8,19 +8,6 @@ import (
 	"time"
 )
 
-type FecLevel int
-
-const (
-	// FecDisabled 关闭Fec编解码支持
-	FecDisabled FecLevel = iota
-	// FecDepacketizeKeepRtpPacketAndSize 保留RtpPacket结构和大小，仅执行fec修复
-	FecDepacketizeKeepRtpPacketAndSize
-	// FecDepacketizeKeepRtpPacket 保留RtpPacket结构，除了执行fec修复外，会执行解包，将整个block分块数据拼接成大数据包,这个模式会修改rtp的数据格式
-	FecDepacketizeKeepRtpPacket
-	// FecDepacketizeKeepRtpData 去掉Rtp数据包结构，仅保留拼接好的视频编码数据,与 reedsolomon 配合性能最佳，不需要恢复rtp结构
-	FecDepacketizeKeepRtpData
-)
-
 // FecGroup 用于收集和组装同一 GroupID 的分片
 type FecGroup struct {
 	HeaderSample    *FecPacketHeader

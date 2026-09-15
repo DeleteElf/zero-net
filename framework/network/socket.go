@@ -288,7 +288,7 @@ func (s *Socket) HandleChannelStreamDatagram() {
 func (s *Socket) InitFecParam(channelId int) error {
 	config := &s.StreamConfigs[channelId]
 	if config.FecEnableLevel != FecDisabled {
-		if config.Type == Audio { //音频大约一个数据包是334大小左右，我们直接塞进一个里面
+		if config.Type == Audio { //音频大约一个数据包是640大小，我们直接塞进一个里面
 			total := config.DataShards + config.ParityShards
 			packetizer := s.StreamChannels[channelId].Packetizers[0]
 			packetizer.SharedShards = make([][]byte, total)
@@ -301,7 +301,7 @@ func (s *Socket) InitFecParam(channelId int) error {
 		}
 	}
 	s.StreamChannels[channelId].Level = config.FecEnableLevel //传递控制级别进入
-	return nil                                                // s.StreamChannels[channelId].BuildFecEncoder()
+	return nil
 }
 
 func (s *Socket) UpdateFecParam(channelId int, dataShards, parityShards uint8) error {
