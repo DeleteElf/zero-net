@@ -299,11 +299,9 @@ func (s *Socket) InitFecParam(channelId int) error {
 			slog.Debug("音频奇偶校验缓存已经分配！")
 			s.StreamChannels[channelId].Depacketizers[0].JumpToNextGroup(100) //音频前100个可能会比屏幕更早出来，我们直接跳过，丢弃
 		}
-		s.StreamChannels[channelId].Level = config.FecEnableLevel //传递控制级别进入
-	} else {
-		s.StreamChannels[channelId].Level = FecDisabled
 	}
-	return nil // s.StreamChannels[channelId].BuildFecEncoder()
+	s.StreamChannels[channelId].Level = config.FecEnableLevel //传递控制级别进入
+	return nil                                                // s.StreamChannels[channelId].BuildFecEncoder()
 }
 
 func (s *Socket) UpdateFecParam(channelId int, dataShards, parityShards uint8) error {

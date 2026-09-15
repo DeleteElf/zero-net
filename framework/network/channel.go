@@ -276,51 +276,35 @@ func (sc *StreamChannel) requestIdrFrame(ssrc uint8) {
 	slog.Debug("发送Idr 关键帧请求", slog.Any("ssrc", ssrc))
 }
 
+func (sc *StreamChannel) processAudioEmptyPacket(group *FecGroup) {
+	switch sc.Level {
+	case FecDepacketizeKeepRtpData:
+		for i := 0; i < int(group.ShardCount); i++ {
+			if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
+				group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
+			}
+			sc.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(group.Shards[i]), int(group.ShardDataLength))
+		}
+	case FecDepacketizeKeepRtpPacket, FecDepacketizeKeepRtpPacketAndSize: //音频的处置方式一样
+		//case FecDepacketizeKeepRtpPacketAndSize:
+		for i := 0; i < int(group.ShardCount); i++ {
+			var resultData []byte
+			if group.Packets[i] == nil {
+				resultData = RebuildRtpPacket(group.HeaderTemplate, group.Shards[i], uint8(i), group.HeaderSample.DataShards)
+			} else { //清除fecPercentage的数据
+				resultData = group.Packets[i].Payload //直接使用原始数据包，实现零拷贝
+			}
+			sc.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(resultData), len(resultData))
+		}
+	default:
+	}
+}
+
 func (sc *StreamChannel) CheckDataReceiveTimeout(group *FecGroup, depacketizer *Depacketizer) bool {
 	if group.ExpiredAt.Before(time.Now()) { //如果已经过期，则不再等待，直接接收下一个
 		if group.HeaderTemplate[0] == RtpHeader && //音频数据是陆续发送的，我们允许按时间递增等待
 			(group.HeaderTemplate[1] == AudioHeader || group.HeaderTemplate[1] == AudioDynamicHeader) {
-			//expireTime := group.OosTime.Add(AudioOosExpireTime + time.Duration(group.ShardCount-1)*AudioDataTime)
-			//if expireTime.Before(time.Now()) {
-			//	slog.Debug("音频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
-			//		slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
-			//		slog.Any("合计", len(group.Shards)))
-			//todo:这里需要补充一下数据并告诉上层逻辑
-			switch sc.Level {
-			case FecDepacketizeKeepRtpData:
-				for i := 0; i < int(group.ShardCount); i++ {
-					if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-						group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
-					}
-					sc.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(group.Shards[i]), int(group.ShardDataLength))
-				}
-			case FecDepacketizeKeepRtpPacket, FecDepacketizeKeepRtpPacketAndSize: //音频的处置方式一样
-				//case FecDepacketizeKeepRtpPacketAndSize:
-				for i := 0; i < int(group.ShardCount); i++ {
-					var resultData []byte
-					if group.Packets[i] == nil {
-						resultData = RebuildRtpPacket(group.HeaderTemplate, group.Shards[i], uint8(i), group.HeaderSample.DataShards)
-					} else { //清除fecPercentage的数据
-						resultData = group.Packets[i].Payload //直接使用原始数据包，实现零拷贝
-					}
-					sc.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(resultData), len(resultData))
-				}
-			default:
-			}
-			//	depacketizer.DoNextGroup(group.HeaderSample.BlockCount)
-			//	return true
-			//}
-			//return false
-			//} else if group.HeaderTemplate[0] == VideoHeader { //如果是我们的视频包
-			//	//expireTime := group.OosTime.Add(VideoOosExpireTime)
-			//	//if expireTime.Before(time.Now()) {
-			//	//	slog.Debug("视频帧，oos检测，数据接收超时丢弃！", slog.Int("channel", sc.ChannelId),
-			//	//		slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
-			//	//		slog.Any("合计", len(group.Shards)))
-			//	//	depacketizer.DoNextGroup(group.HeaderSample.BlockCount)
-			//	//	return true
-			//	//}
-			//	return false //如果没有超过
+			sc.processAudioEmptyPacket(group)
 		}
 		slog.Debug("帧接收超时丢弃！", slog.Int("channel", sc.ChannelId),
 			slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
@@ -356,11 +340,13 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 							target += math.MaxUint8
 						}
 						for i := uint16(depacketizer.CurrentGroupId); i < target; i++ {
-							delete(depacketizer.Groups, uint8(i)) //清空缓存
-							//todo:这里可能需要补充空洞数据,如果不补，应该也可以，从时间维度来说，无形中，还能追帧，从效果来说，可能出现音爆
+							group := depacketizer.Groups[uint8(i)]
+							if group != nil {
+								sc.processAudioEmptyPacket(depacketizer.Groups[uint8(i)])
+							}
 						}
 						slog.Debug("新的音频数据已经满足解包，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
-						depacketizer.CurrentGroupId = packet.Header.GroupIdx //直接跳到当前，旧的全部舍弃
+						depacketizer.JumpToNextGroup(packet.Header.GroupIdx)
 						continue
 					}
 				}

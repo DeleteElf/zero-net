@@ -642,17 +642,8 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 	data.id = C.CString(currentStream.ClientId)
 	bufferMaxSize := int(data.len)
 	copySize := currentStream.Size - currentStream.Offset //拷贝大小
-	if bufferMaxSize > 0 {                                //如果上层要求指定大小
-		//if copySize > bufferMaxSize { //如果需要分多次读取，我们才需要缓存
-		//	if channel.Depacketizers[reader.Ssrc] == nil { //不走fec解包时，没有解包器
-		//		channel.BufferStream = reader
-		//	} else {
-		//		channel.Depacketizers[reader.Ssrc].BufferStream = reader
-		//	}
-		//}
+	if bufferMaxSize > 0 {                                //将数据写入c++的byte[]中
 		copySize = min(copySize, bufferMaxSize) //修改成根据缓冲区大小来读取数据
-	}
-	if bufferMaxSize > 0 { //将数据写入c++的byte[]中
 		goBuf := unsafe.Slice((*byte)(unsafe.Pointer(data.ptr)), int(copySize))
 		_, err := io.ReadFull(currentStream.Reader, goBuf)
 		if err != nil && err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
@@ -668,7 +659,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 	}
 	data.len = C.int(copySize)
 	currentStream.Offset += copySize
-	if bufferMaxSize > 0 && currentStream.Offset >= currentStream.Size {
+	if currentStream.Offset >= currentStream.Size {
 		currentStream = nil
 	}
 
