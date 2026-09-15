@@ -350,7 +350,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 							}
 						}
 						slog.Debug("新的音频数据已经满足解包，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
-						depacketizer.JumpToNextGroup(packet.Header.GroupIdx)
+						depacketizer.JumpToNextGroup(packet.Header.GroupIdx, packet.Header.FrameIndex)
 						continue
 					}
 				}
@@ -365,7 +365,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 				if sc.CheckDataReceiveTimeout(nextGroup, depacketizer) {
 					continue
 				}
-			} else {                                                                                          //视频数据包
+			} else { //视频数据包
 				if depacketizer.StartFrameIndex != depacketizer.CurrentFrameIndex && nextGroup.Received > 0 { //重新计算当前分组的丢包情况
 					outOfSequence := false
 					count := (nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber + 1) & 0xFFFF

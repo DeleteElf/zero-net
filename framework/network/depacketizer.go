@@ -82,44 +82,25 @@ func (d *Depacketizer) JumpToNextIdrPacket(p *FecPacket) {
 	if p.Header.BlockIdx == 0 && utils.IsBefore8(d.CurrentGroupId, p.Header.GroupIdx) { //如果是比当前更新的关键帧
 		slog.Debug("帧接收新的关键帧，跳到！", slog.Any("channel", p.Header.ChannelId),
 			slog.Any("groupId", p.Header.GroupIdx))
-		if d.Groups[d.CurrentGroupId] != nil { //如果存在当前组
-			d.DoNextGroup(d.Groups[d.CurrentGroupId].HeaderSample.BlockCount)
-		}
-		target := int(p.Header.GroupIdx)
-		if p.Header.GroupIdx < d.CurrentGroupId { //考虑溢出问题
-			target = int(p.Header.GroupIdx) + math.MaxUint8
-		}
-		for i := int(d.CurrentGroupId); i < target; i++ {
-			delete(d.Groups, uint8(i))
-		}
-		d.CurrentGroupId = p.Header.GroupIdx
-		d.CurrentFrameIndex = p.Header.FrameIndex
-		d.CurrentBlockIndex = 0
-		d.MissingPackets = 0
-		//d.ReportedLostFrame = false
-		//d.ReceivedOosData = false
+		d.JumpToNextGroup(p.Header.GroupIdx, p.Header.FrameIndex)
 	}
 }
 
-func (d *Depacketizer) JumpToNextGroup(groupId uint8) {
+func (d *Depacketizer) JumpToNextGroup(groupId uint8, frameIndex uint32) {
 	if utils.IsBefore8(d.CurrentGroupId, groupId) { //只能往后跳，还最多只能跳127
 		slog.Debug("跳帧到下个分组", slog.Any("groupId", groupId))
-		if d.Groups[d.CurrentGroupId] != nil { //如果存在当前组
-			d.DoNextGroup(d.Groups[d.CurrentGroupId].HeaderSample.BlockCount)
-		}
+		start := d.CurrentGroupId - d.CurrentBlockIndex
 		target := int(groupId)
-		if groupId < d.CurrentGroupId { //考虑溢出问题
+		if groupId < start { //考虑溢出问题
 			target = int(groupId) + math.MaxUint8
 		}
-		for i := int(d.CurrentGroupId); i < target; i++ {
+		for i := int(start); i < target; i++ {
 			delete(d.Groups, uint8(i))
 		}
 		d.CurrentGroupId = groupId
-		d.CurrentFrameIndex = 0 //如果有用，需要后续自己修复
-		d.CurrentBlockIndex = 0 //如果有用，需要后续自己修复
+		d.CurrentFrameIndex = frameIndex //如果有用，需要后续自己修复
+		d.CurrentBlockIndex = 0          //如果有用，需要后续自己修复
 		d.MissingPackets = 0
-		//d.ReportedLostFrame = false
-		//d.ReceivedOosData = false
 	}
 }
 
@@ -131,7 +112,7 @@ func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 	//d.ReceivedOosData = false
 	if d.CurrentBlockIndex >= blockCount { //执行下一帧
 		for i := 0; i < int(d.CurrentBlockIndex); i++ { //删除当前帧的缓存
-			delete(d.Groups, d.CurrentGroupId-1-uint8(i))
+			delete(d.Groups, d.CurrentGroupId-d.CurrentBlockIndex+uint8(i))
 		}
 		d.CurrentBlockIndex = 0
 		d.CurrentFrameIndex++
