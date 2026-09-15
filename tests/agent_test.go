@@ -25,7 +25,7 @@ func agentSocketHandler(sock *network.Socket) {
 
 func angetMessageHandler(sock *network.Socket, channelIndex int) {
 	for {
-		if sock.IsClosed {
+		if sock.IsClosed() {
 			break
 		}
 		_, err := sock.ReceiveDataToStreamReader(channelIndex) //这个会卡住等待
@@ -33,7 +33,7 @@ func angetMessageHandler(sock *network.Socket, channelIndex int) {
 			slog.Error(err.Error())
 			break
 		}
-		if sock.IsClosed {
+		if sock.IsClosed() {
 			break
 		}
 		currentBuffer := sock.StreamChannels[channelIndex].BufferStream
@@ -92,7 +92,7 @@ func TestHostAgent(t *testing.T) {
 	testMgr.ConnectToPlatform()
 	go testMgr.Hearts()
 	for {
-		if testMgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
+		if testMgr.IsClosed() { //如果服务已经关闭，则不再继续连接管理平台
 			break
 		}
 		if err := testMgr.ListenAgentConnect(func(sock *network.Socket) {
@@ -104,7 +104,7 @@ func TestHostAgent(t *testing.T) {
 			slog.Debug("未与管理平台连接成功，5秒后重试！", slog.Any("err", err))
 			time.Sleep(5 * time.Second)
 		}
-		if !testMgr.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
+		if !testMgr.IsClosed() { //如果服务已经关闭，则不再继续连接管理平台
 			slog.Debug("与管理平台断开连接，5秒后重试！")
 			time.Sleep(5 * time.Second)
 		}
@@ -183,7 +183,7 @@ func TestClientAgent(t *testing.T) {
 	}
 	cli := ConnectClientAgent(request, cfg)
 	for {
-		if cli == nil || cli.IsClosed {
+		if cli == nil || cli.IsClosed() {
 			break
 		}
 		_, _ = cli.Socket.Ping(0)

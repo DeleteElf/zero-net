@@ -17,15 +17,20 @@ type OnCloseHandler interface {
 type Closeable interface {
 	io.Closer
 	SetOnCloseHandler(handler OnCloseHandler)
+	IsClosed() bool
 }
 
 // CloseableObject 实现基础流程逻辑的关闭对象
 type CloseableObject struct {
-	IsClosed  bool
+	Closed    bool
 	closeLock sync.Mutex
 
 	onCloseHandler OnCloseHandler
 	Closeable
+}
+
+func (c *CloseableObject) IsClosed() bool {
+	return c.Closed
 }
 
 // SetOnCloseHandler 设置关闭时需要执行的句柄
@@ -37,11 +42,11 @@ func (c *CloseableObject) SetOnCloseHandler(handler OnCloseHandler) {
 func (c *CloseableObject) Close() error {
 	c.closeLock.Lock()
 	defer c.closeLock.Unlock()
-	if !c.IsClosed { //防止多次执行
+	if !c.IsClosed() { //防止多次执行
 		//开始释放资源
 		if c.onCloseHandler != nil {
 			if c.onCloseHandler.OnClosing() {
-				c.IsClosed = true
+				c.Closed = true
 				return c.onCloseHandler.OnClosed()
 			}
 		}

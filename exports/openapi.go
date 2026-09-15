@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/DeleteElf/zero-net/agent"
 	"github.com/DeleteElf/zero-net/client"
+	"github.com/DeleteElf/zero-net/framework"
 	"github.com/DeleteElf/zero-net/framework/network"
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/DeleteElf/zero-net/server"
@@ -277,8 +278,11 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	return C.Success
 }
 
-func socketChannelReceive(socket *network.Socket, channelId int, data *C.NetworkData) C.int {
-	if socket.IsClosed {
+func socketChannelReceive(ctx framework.Closeable, socket *network.Socket, channelId int, data *C.NetworkData) C.int {
+	if socket == nil {
+		return C.Closed
+	}
+	if socket.IsClosed() {
 		return C.Closed
 	}
 	_, err := socket.ReceiveDataToStreamReader(channelId) //这个会等待数据到达
@@ -286,7 +290,13 @@ func socketChannelReceive(socket *network.Socket, channelId int, data *C.Network
 		slog.Warn(err.Error())
 		return C.ErrorClose
 	}
-	if socket.IsClosed {
+	if ctx == nil {
+		return C.Closed
+	}
+	if ctx.IsClosed() {
+		return C.Closed
+	}
+	if socket.IsClosed() {
 		return C.Closed
 	}
 	if len(socket.StreamChannels) == 0 || socket.StreamChannels[channelId] == nil {
@@ -343,7 +353,7 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 		slog.Warn("请先连接服务端！")
 		return C.ErrorContext
 	}
-	if clientCtx.IsClosed {
+	if clientCtx.IsClosed() {
 		//slog.Warn("请先连接服务端！")
 		return C.Closed
 	}
@@ -352,7 +362,7 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 	}
 	socket := clientCtx.Socket
 	channelId := int(chnIdx)
-	return socketChannelReceive(socket, channelId, data)
+	return socketChannelReceive(clientCtx, socket, channelId, data)
 	//_, err := socket.ReceiveDataToBuffer(channelId) //这个会卡住等待
 	//if err != nil {
 	//	slog.Warn(err.Error())
@@ -361,13 +371,13 @@ func ClientChannelReceive(chnIdx C.int, data *C.NetworkData) C.int {
 	//if clientCtx == nil {
 	//	return C.Closed
 	//}
-	//if clientCtx.IsClosed {
+	//if clientCtx.IsClosed() {
 	//	return C.Closed
 	//}
 	//if clientCtx.Socket == nil {
 	//	return C.Closed
 	//}
-	//if socket.IsClosed {
+	//if socket.IsClosed() {
 	//	return C.Closed
 	//}
 	//if len(socket.StreamChannels) == 0 || socket.StreamChannels[channelId] == nil {
@@ -587,7 +597,7 @@ func ServerSocketReceive(data *C.ClientData) C.int {
 		return C.ErrorContext
 	}
 	for {
-		if serverCtx != nil && serverCtx.IsClosed { //如果等待的过程，结束了，则退出
+		if serverCtx != nil && serverCtx.IsClosed() { //如果等待的过程，结束了，则退出
 			return C.ErrorContext
 		}
 		if len(socketMap) == 0 { //如果还没有接入，则执行等待
@@ -696,14 +706,14 @@ func ServerSocketChannelReceive(clientId *C.char, chnIdx C.int, data *C.NetworkD
 		return C.ErrorSocket
 	}
 	channelIndex := int(chnIdx)
-	return socketChannelReceive(sock, channelIndex, data)
+	return socketChannelReceive(serverCtx, sock, channelIndex, data)
 	//
 	//_, err := sock.ReceiveDataToBuffer(channelIndex) //这个会卡住等待
 	//if err != nil {
 	//	slog.Warn(err.Error())
 	//	return C.ErrorClose
 	//}
-	//if sock.IsClosed { //优化如果过程中断开后继续
+	//if sock.IsClosed() { //优化如果过程中断开后继续
 	//	return C.Closed
 	//}
 	//if channelIndex >= sock.ChannelCount { //到这边说明是已经关闭了
@@ -747,7 +757,7 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 	if data == nil {
 		return C.ErrorParam
 	}
-	if managerCtx != nil && !managerCtx.IsClosed {
+	if managerCtx != nil && !managerCtx.IsClosed() {
 		return C.Success
 	}
 	url := fmt.Sprintf("%s/device?type=proxy&apikey=%s",
@@ -764,7 +774,7 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 	}
 	go func() {
 		for {
-			if managerCtx == nil || managerCtx.IsClosed { //如果服务已经关闭，则不再继续连接管理平台
+			if managerCtx == nil || managerCtx.IsClosed() { //如果服务已经关闭，则不再继续连接管理平台
 				break
 			}
 			managerCtx.ConnectToPlatform()
@@ -782,7 +792,7 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 				delete(socketMap, sock.Id)
 			})
 			if err1 != nil {
-				if managerCtx == nil || managerCtx.IsClosed {
+				if managerCtx == nil || managerCtx.IsClosed() {
 					break
 				}
 				slog.Debug("监听管理平台的websocket发生错误，3秒后重试！", slog.Any("err", err1))
@@ -860,7 +870,7 @@ func WebSocketClose() C.int {
 
 //export WebSocketSend
 func WebSocketSend(msg *C.char) C.int {
-	if websocketClient != nil && !websocketClient.IsClosed {
+	if websocketClient != nil && !websocketClient.IsClosed() {
 		_ = websocketClient.Send(C.GoString(msg))
 		return C.Success
 	}
@@ -888,7 +898,7 @@ func SetOnWebSocketMessageCallback(callback C.MessageCallback) {
 							sessionId = body["session_id"].(string)
 							result["session_id"] = sessionId
 						}
-						if serverCtx != nil && !serverCtx.IsClosed && len(serverCtx.IceLocalInfo) > 0 {
+						if serverCtx != nil && !serverCtx.IsClosed() && len(serverCtx.IceLocalInfo) > 0 {
 							result["data"] = serverCtx.IceLocalInfo
 							re, e := utils.ToJsonString(result)
 							if len(re) > 0 && e == nil {

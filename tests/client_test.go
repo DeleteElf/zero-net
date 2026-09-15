@@ -14,7 +14,7 @@ import (
 
 func receiveHandler(cli *client.Client, channelIndex int) {
 	for {
-		if cli.IsClosed || cli.Socket.IsClosed {
+		if cli.IsClosed() || cli.Socket.IsClosed() {
 			break
 		}
 		slog.Info("正在准备接收数据", slog.Int("channel", channelIndex))
@@ -93,7 +93,7 @@ func TestClient(t *testing.T) {
 	//time.Sleep(time.Second * 3) //等待3秒，等他们通讯完成再退出
 	for {
 		time.Sleep(time.Second * 6)
-		if cli.IsClosed || cli.Socket == nil || cli.Socket.IsClosed {
+		if cli.IsClosed() || cli.Socket == nil || cli.Socket.IsClosed() {
 			break
 		} else {
 			_, _ = cli.Socket.Ping(0)

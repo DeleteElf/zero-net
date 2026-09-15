@@ -18,7 +18,7 @@ var restart bool = false
 
 func messageHandler(svr *server.Server, sock *network.Socket, channelIndex int) {
 	for {
-		if sock.IsClosed {
+		if sock.IsClosed() {
 			break
 		}
 		_, err := sock.ReceiveDataToStreamReader(channelIndex) //这个会卡住等待
@@ -26,7 +26,7 @@ func messageHandler(svr *server.Server, sock *network.Socket, channelIndex int) 
 			slog.Error(err.Error())
 			break
 		}
-		if sock.IsClosed {
+		if sock.IsClosed() {
 			break
 		}
 		if sock.StreamChannels[channelIndex] == nil {

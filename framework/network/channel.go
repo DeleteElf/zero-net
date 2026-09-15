@@ -87,7 +87,7 @@ func NewStreamChannel(id string, index int) *StreamChannel {
 		Depacketizers:     make(map[uint8]*Depacketizer), //初始化空的解包器
 		Packetizers:       make(map[uint8]*Packetizer),   //初始化空的打包器
 		CloseableObject: framework.CloseableObject{
-			IsClosed: false,
+			Closed: false,
 		},
 	}
 	sc.Depacketizers[0] = NewDepacketizer() //初始化一个解包器
@@ -144,7 +144,7 @@ func (sc *StreamChannel) HandleStreamData(stream *quic.Stream) {
 		sc.OnConnect(sc.ClientId, sc.ChannelId)
 	}
 	for {
-		if sc.IsClosed {
+		if sc.IsClosed() {
 			return
 		}
 		buf, err := utils.ReadStreamByHeaderUShort(sc.Stream)
@@ -159,7 +159,7 @@ func (sc *StreamChannel) HandleStreamData(stream *quic.Stream) {
 			}
 			return
 		}
-		if sc.IsClosed {
+		if sc.IsClosed() {
 			return
 		}
 		size := len(buf)
@@ -197,7 +197,7 @@ func (sc *StreamChannel) ReceiveDataToStreamReader() bool {
 }
 
 func (sc *StreamChannel) Send(data []byte) (bool, error) {
-	if sc.IsClosed {
+	if sc.IsClosed() {
 		return false, nil
 	}
 	if sc.Stream == nil {

@@ -126,14 +126,14 @@ func (s *Server) StartListen(onDisconnect network.SocketCallbackFunc) {
 	slog.Info("服务启动监听", slog.Any("addr", s.NetConn.LocalAddr()))
 	//s.IsInQuic = true
 	for {
-		if s.IsClosed { //已经关闭则退出
+		if s.IsClosed() { //已经关闭则退出
 			break
 		}
 		if s.listener == nil {
 			break
 		}
 		s.QuicConn, err = s.listener.Accept(context.TODO())
-		if s.IsClosed { //不再接受新的连接
+		if s.IsClosed() { //不再接受新的连接
 			break
 		}
 		if err != nil {
@@ -153,7 +153,7 @@ func (s *Server) acceptConnection(quicConn *quic.Conn, onDisconnect network.Sock
 	}()
 
 	for {
-		if s.IsClosed {
+		if s.IsClosed() {
 			break
 		}
 		stream, err := quicConn.AcceptStream(context.TODO())

@@ -46,7 +46,7 @@ func TestIceClient(t *testing.T) {
 	}
 
 	for {
-		if cli.IsClosed {
+		if cli.IsClosed() {
 			break
 		} else {
 			time.Sleep(time.Second)
@@ -64,7 +64,7 @@ func TestIceServer(t *testing.T) {
 	}
 	ws.OnDisconnected = func(reason string) {
 		slog.Info("与服务端断开连接", slog.String("reason", reason))
-		//if ws.Reconnect && !ws.IsClosed {
+		//if ws.Reconnect && !ws.IsClosed() {
 		//	_ = ws.Connect(ws.Address, ws.HeartMessage)
 		//}
 	}
@@ -174,7 +174,7 @@ func TestIceServer(t *testing.T) {
 
 		// 直接从底层的 net.PacketConn 中读取原生 UDP 数据包
 		for {
-			if testServer.IsClosed {
+			if testServer.IsClosed() {
 				break
 			}
 			time.Sleep(time.Second * 1)

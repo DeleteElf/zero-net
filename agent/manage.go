@@ -58,7 +58,7 @@ func NewManagePlatform(cfg *Config) *ManagePlatform {
 		lastMessageTime:    time.Now(),
 	}
 	mgr.config.Id = time.Now().UnixNano()
-	mgr.IsClosed = false
+	mgr.Closed = false
 	mgr.SetOnCloseHandler(mgr)
 	return mgr
 }
@@ -130,7 +130,7 @@ func (mgr *ManagePlatform) Hearts() {
 		if mgr.wsConn == nil {
 			break
 		}
-		if mgr.IsClosed {
+		if mgr.IsClosed() {
 			break
 		}
 		if id != mgr.config.Id { //如果已经不是之前的连接，则跳出
@@ -154,7 +154,7 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect netwo
 		if mgr.wsConn == nil {
 			break
 		}
-		if mgr.IsClosed {
+		if mgr.IsClosed() {
 			break
 		}
 		_, msg, err := mgr.wsConn.ReadMessage()

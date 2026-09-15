@@ -18,7 +18,7 @@ func TestWebSocketClient(t *testing.T) {
 	}
 	client.OnDisconnected = func(reason string) {
 		slog.Info("与服务端断开连接", slog.String("reason", reason))
-		if client.Reconnect && !client.IsClosed {
+		if client.Reconnect && !client.IsClosed() {
 			_ = client.Connect(client.Address, client.HeartMessage)
 		}
 	}

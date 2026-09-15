@@ -57,7 +57,7 @@ func TestFecSimple(t *testing.T) {
 
 func fecMessageHandler(sock *network.Socket, channelIndex int) {
 	for {
-		if sock.IsClosed {
+		if sock.IsClosed() {
 			break
 		}
 		_, err := sock.ReceiveDataToStreamReader(channelIndex) //这个会卡住等待
@@ -65,7 +65,7 @@ func fecMessageHandler(sock *network.Socket, channelIndex int) {
 			slog.Error(err.Error())
 			break
 		}
-		if sock.IsClosed {
+		if sock.IsClosed() {
 			break
 		}
 		if sock.StreamChannels[channelIndex] == nil {
@@ -282,7 +282,7 @@ func TestFecClient(t *testing.T) {
 	//time.Sleep(time.Second * 3) //等待3秒，等他们通讯完成再退出
 	for {
 		time.Sleep(time.Second * 6)
-		if cli.IsClosed || cli.Socket == nil || cli.Socket.IsClosed {
+		if cli.IsClosed() || cli.Socket == nil || cli.Socket.IsClosed() {
 			break
 		} else {
 			_, _ = cli.Socket.Ping(0)

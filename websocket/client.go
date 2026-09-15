@@ -39,7 +39,7 @@ func NewClient() *Client {
 		Reason:       "",
 		Reconnect:    true,
 	}
-	cli.IsClosed = false
+	cli.Closed = false
 	cli.SetOnCloseHandler(cli)
 	return cli
 }
@@ -84,7 +84,7 @@ func (c *Client) Connect(address, heartMessage string) error {
 			if !c.Connected {
 				break
 			}
-			if c.IsClosed {
+			if c.IsClosed() {
 				break
 			}
 			_, msg, err := c.Conn.ReadMessage()
@@ -135,7 +135,7 @@ func (c *Client) Heart(heartMessage string) {
 		if !c.Connected {
 			break
 		}
-		if c.IsClosed {
+		if c.IsClosed() {
 			break
 		}
 		if c.lastMessageTime.Add(expireDuration).Compare(time.Now()) < 0 {
@@ -172,7 +172,7 @@ func (c *Client) SendJson(v any) error {
 }
 
 func (c *Client) Send(msg string) error {
-	if c.Conn != nil && !c.IsClosed {
+	if c.Conn != nil && !c.IsClosed() {
 		slog.Debug("发送消息", slog.String("body", msg))
 		return c.Conn.WriteMessage(websocket.TextMessage, []byte(msg))
 	}

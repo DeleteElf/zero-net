@@ -87,7 +87,7 @@ func NewSocket(id string, channelCount int, packetSize uint16, onDisconnect Sock
 		MtuPacketSize: packetSize,
 		Context:       context.Background(),
 	}
-	sock.IsClosed = false
+	sock.Closed = false
 	sock.SetOnCloseHandler(sock)
 	sock.FecLimitPacketSize = FecLimitPacketSize
 	sock.OnDisconnect = onDisconnect
@@ -141,7 +141,7 @@ func (s *Socket) CreateChannels() {
 	for i := 0; i < s.ChannelCount; i++ {
 		s.StreamChannels[i] = NewStreamChannel(s.Id, i) //make(chan StreamChannelData, 3) //创建通道实例
 		s.StreamChannels[i].OnDisconnect = func(id string, index int) {
-			if !s.IsClosed {
+			if !s.IsClosed() {
 				s.channelEditLock.Lock()
 				if index < len(s.StreamChannels) && s.StreamChannels[index] != nil {
 					_ = s.StreamChannels[index].Close()
@@ -151,7 +151,7 @@ func (s *Socket) CreateChannels() {
 				if s.OnDisconnect != nil {
 					finded := false
 					for _, channel := range s.StreamChannels {
-						if channel != nil && !channel.IsClosed {
+						if channel != nil && !channel.IsClosed() {
 							finded = true
 							break
 						}
@@ -198,7 +198,7 @@ func (s *Socket) ReceiveDataToStreamReader(channelId int) (bool, error) {
 }
 
 func (s *Socket) Send(channelId int, data []byte) (bool, error) {
-	if s.IsClosed {
+	if s.IsClosed() {
 		return false, errors.New("socket is closed")
 	}
 	if channelId >= s.ChannelCount {
@@ -217,7 +217,7 @@ func (s *Socket) Send(channelId int, data []byte) (bool, error) {
 }
 
 func (s *Socket) Ping(channelId int) (bool, error) {
-	if s.IsClosed {
+	if s.IsClosed() {
 		return false, nil
 	}
 	if channelId >= s.ChannelCount {
@@ -250,13 +250,13 @@ func (s *Socket) HandleChannelStreamDatagram() {
 	slog.Info("开始接收 FEC Datagram 数据流...")
 	isFirst := true
 	for {
-		if s.IsClosed {
+		if s.IsClosed() {
 			return
 		}
 		data, err := s.Conn.ReceiveDatagram(ctx)
 		if err != nil {
 			// 如果是连接关闭或 Context 取消，优雅退出循环，防止 CPU 100% 爆满
-			if errors.Is(err, context.Canceled) || s.IsClosed {
+			if errors.Is(err, context.Canceled) || s.IsClosed() {
 				slog.Info("Datagram 接收协程正常退出")
 				return
 			}

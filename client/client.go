@@ -47,7 +47,7 @@ func NewClient(addr string, id string) *Client {
 }
 
 func (cli *Client) CloseChannel(channelId int) bool {
-	if !cli.IsClosed && cli.Socket != nil {
+	if !cli.IsClosed() && cli.Socket != nil {
 		return cli.Socket.CloseChannel(channelId)
 	}
 	return false
@@ -198,7 +198,7 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 
 func (cli *Client) Send(channelId int, data []byte) (bool, error) {
 
-	if cli.IsClosed {
+	if cli.IsClosed() {
 		return false, errors.New("client is closed")
 	}
 	if cli.Socket == nil {
