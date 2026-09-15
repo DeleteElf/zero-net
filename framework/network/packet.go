@@ -142,11 +142,14 @@ type AudioFecPacket struct {
 //
 // return 返回构建好的新数据包
 func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte {
+	dataLength := len(data)
 	if header[1] == 0x61 || header[1] == 0x7f {
-		total := RtpHeaderLength + len(data)
+		total := RtpHeaderLength + dataLength
 		buffer := make([]byte, total)               //循环中，且释放时机不好确定，不使用sync.Pool
 		copy(buffer[0:], header[0:RtpHeaderLength]) //仅拷贝加入rtp包即可
-		copy(buffer[RtpHeaderLength:], data)
+		if dataLength > 0 {
+			copy(buffer[RtpHeaderLength:], data)
+		}
 		switch header[1] {
 		case 0x61: //标准音频
 			sequenceNumber := binary.BigEndian.Uint16(buffer[2:])
@@ -183,7 +186,9 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 		total := VideoHeaderLength + len(data)
 		buffer := make([]byte, total)                 //循环中，且释放时机不好确定，不使用sync.Pool
 		copy(buffer[0:], header[0:VideoHeaderLength]) //仅拷贝加入rtp包即可
-		copy(buffer[VideoHeaderLength:], data)
+		if dataLength > 0 {
+			copy(buffer[VideoHeaderLength:], data)
+		}
 		oldFecInfo := binary.LittleEndian.Uint32(buffer[28:])
 		oldShardIndex := uint16((oldFecInfo >> 12) & 0x3FF)
 		newFecInfo := (oldFecInfo & 0xFFF) | (uint32(dataShards) << 22) | (uint32(shardIndex) << 12) // 清空高 20 位（保留低 12 位 0x00000FFF），并填入新的 dataShards 和 shardIndex

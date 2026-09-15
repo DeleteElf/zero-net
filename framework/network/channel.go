@@ -294,8 +294,8 @@ func (sc *StreamChannel) CheckDataReceiveTimeout(group *FecGroup, depacketizer *
 					}
 					sc.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(group.Shards[i]), int(group.ShardDataLength))
 				}
-			//case FecDepacketizeKeepRtpPacket,FecDepacketizeKeepRtpPacketAndSize:
-			case FecDepacketizeKeepRtpPacketAndSize:
+			case FecDepacketizeKeepRtpPacket, FecDepacketizeKeepRtpPacketAndSize: //音频的处置方式一样
+				//case FecDepacketizeKeepRtpPacketAndSize:
 				for i := 0; i < int(group.ShardCount); i++ {
 					var resultData []byte
 					if group.Packets[i] == nil {
@@ -455,8 +455,8 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 				for i := 0; i < int(nextGroup.ShardCount); i++ {
 					sc.handleReaderToChannel(nextGroup.HeaderSample.Ssrc, bytes.NewReader(nextGroup.Shards[i]), int(nextGroup.ShardDataLength)) //直接使用原始数据包，实现零拷贝
 				}
-			//case FecDepacketizeKeepRtpPacket,FecDepacketizeKeepRtpPacketAndSize:
-			case FecDepacketizeKeepRtpPacketAndSize:
+			case FecDepacketizeKeepRtpPacket, FecDepacketizeKeepRtpPacketAndSize: //音频的处置方式一样
+				//case FecDepacketizeKeepRtpPacketAndSize:
 				for i := 0; i < int(nextGroup.ShardCount); i++ {
 					var resultData []byte
 					if nextGroup.Packets[i] == nil {
@@ -476,8 +476,8 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			//1，我需要补充没有到的正规rtp 包的头信息 ，假设 一共6个数据包，数据分片是4个，当前到达的索引是 0,1,3,4，那么则需要补充序号是2的rtp头
 			//2，我需要告诉上层逻辑，fec已经处理完毕了
 			switch sc.Level {
-			//case FecDepacketizeKeepRtpData,FecDepacketizeKeepRtpPacket:
-			case FecDepacketizeKeepRtpData:
+			case FecDepacketizeKeepRtpData, FecDepacketizeKeepRtpPacket:
+				//case FecDepacketizeKeepRtpData:
 				if nextGroup.HeaderSample.BlockIdx == nextGroup.HeaderSample.BlockCount-1 { //确保是最后一个分块
 					totalShardCount := uint16(0)
 					totalSize := 0
@@ -485,13 +485,27 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 					for i := uint8(0); i < nextGroup.HeaderSample.BlockCount; i++ {
 						totalShardCount += uint16(depacketizer.Groups[startGroupId+i].ShardCount)
 					}
-					readers := make([]io.Reader, int(totalShardCount))
 					index := 0
+					if sc.Level == FecDepacketizeKeepRtpPacket { //需要增加一个输入头
+						totalShardCount++
+					}
+					readers := make([]io.Reader, int(totalShardCount))
+					if sc.Level == FecDepacketizeKeepRtpPacket { //需要增加一个输入头
+						var resultData []byte
+						if nextGroup.Packets[0] == nil {
+							resultData = RebuildRtpPacket(nextGroup.HeaderTemplate, []byte{}, uint8(0), header.DataShards)[:VideoHeaderLength]
+						} else { //清除fecPercentage的数据
+							resultData = nextGroup.Packets[0].Payload[:VideoHeaderLength] //直接使用原始数据包，实现零拷贝
+						}
+						readers[index] = bytes.NewReader(resultData)
+						index++
+					}
 					for i := uint8(0); i < nextGroup.HeaderSample.BlockCount; i++ {
 						group := depacketizer.Groups[startGroupId+i]
 						for j := uint8(0); j < group.ShardCount; j++ {
 							totalSize += int(group.ShardDataLength)
 							readers[index] = bytes.NewReader(group.Shards[j])
+							index++
 						}
 					}
 					streamReader := io.MultiReader(readers...)
