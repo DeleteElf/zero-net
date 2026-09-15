@@ -139,7 +139,7 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 		if len(packet.Payload) > headerSize {
 			group.HeaderTemplate = packet.Payload[:headerSize]
 		} else {
-			slog.Debug("数据包校验失败", slog.Any("data", packet.Payload))
+			slog.Debug("数据包校验失败", slog.Any("group", group), slog.Any("data", packet.Payload))
 			return false
 		}
 		d.Groups[packet.Header.GroupIdx] = group
