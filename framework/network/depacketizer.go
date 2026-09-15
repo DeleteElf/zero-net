@@ -125,17 +125,22 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 			//GroupID: packet.Header.GroupIdx, DataShards: packet.Header.DataShards, ParityShards: packet.Header.ParityShards,
 			//Total: packet.Header.Total, Received: 0, CreatedAt: time.Now(),
 		}
+		headerSize := FecPacketHeaderLength
 		if isRtp { //如果判定是rtp包，我们就需要预处理一下数据，方便后期补充rtp包
 			switch packet.Payload[1] {
 			case 0x61: //标准音频
-				group.HeaderTemplate = packet.Payload[:RtpHeaderLength]
+				headerSize = RtpHeaderLength
 			case 0x7f: //动态音频
-				group.HeaderTemplate = packet.Payload[:AudioHeaderLength]
+				headerSize = AudioHeaderLength
 			default: //其他都是视频 视频数据的rtp包数据都是一样的
-				group.HeaderTemplate = packet.Payload[:VideoHeaderLength]
+				headerSize = VideoHeaderLength
 			}
+		}
+		if len(packet.Payload) > headerSize {
+			group.HeaderTemplate = packet.Payload[:headerSize]
 		} else {
-			group.HeaderTemplate = packet.Payload[:FecPacketHeaderLength] //因为信息一致性，我们其实不用再次赋值
+			slog.Debug("数据包校验失败", slog.Any("data", packet.Payload))
+			return false
 		}
 		d.Groups[packet.Header.GroupIdx] = group
 	}
