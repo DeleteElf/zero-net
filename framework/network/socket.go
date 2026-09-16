@@ -389,22 +389,6 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		packet.Header.Length = uint16(size - int(packet.Header.HeaderSize))
 		packet.Header.Total = uint32(packet.Header.DataShards) * uint32(packet.Header.Length)
 		packet.Header.Idr = uint8(fecInfo >> 11 & 0x1) //idr 1 位
-		//暂时不执行 frameIndex检查，udp必然乱序，因此我们不依赖这个来检查，只需要fec成功即可
-		//检查解包器是否存在
-		//depacketizer, exists := s.StreamChannels[packet.Header.ChannelId].Depacketizers[packet.Header.Ssrc]
-		//if !exists {
-		//	depacketizer = NewDepacketizer()
-		//	s.StreamChannels[packet.Header.ChannelId].Depacketizers[packet.Header.Ssrc] = depacketizer
-		//}
-		//if utils.IsBefore32(packet.Header.FrameIndex, depacketizer.CurrentFrameIndex) {
-		//	slog.Debug("收到更早的数据帧，丢弃", slog.Any("channel", packet.Header.ChannelId),
-		//		slog.Any("currentFrameIndex", depacketizer.CurrentFrameIndex),
-		//		slog.Any("packetFrameIndex", packet.Header.FrameIndex))
-		//	return nil
-		//}
-		//if utils.IsBefore32(depacketizer.CurrentFrameIndex, packet.Header.FrameIndex) { //更新
-		//	depacketizer.CurrentFrameIndex = packet.Header.FrameIndex
-		//}
 	case CustomFecHeader:
 		if size <= FecPacketHeaderLength {
 			slog.Debug("收到无效的fec数据包", slog.Int("len", size), slog.Any("data", data))
@@ -435,7 +419,7 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		slog.Debug("未知数据包，丢弃", slog.Any("data", packet.Payload))
 		return nil
 	}
-	if int(packet.Header.Length)+int(packet.Header.HeaderSize) != len(packet.Payload) {
+	if size <= int(packet.Header.HeaderSize) || int(packet.Header.Length)+int(packet.Header.HeaderSize) != size {
 		slog.Debug("数据长度不一致，丢弃！", slog.Any("channel", packet.Header.ChannelId),
 			slog.Any("ssrc", packet.Header.Ssrc),
 			slog.Any("groupId", packet.Header.GroupIdx),
@@ -457,13 +441,6 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		//	slog.Any("currentGroupIndex", depacketizer.CurrentGroupId),
 		//	slog.Any("packetGroupIndex", packet.Header.GroupIdx))
 		return nil
-	}
-	if packet.Header.Idr == 1 { //如果是 关键帧，则移动当前数据到本帧，并丢弃前面的数据,执行追帧
-		if depacketizer.WaitingForIdrFrame && packet.Header.BlockIdx == 0 {
-			slog.Debug("收到关键帧，正在执行追帧！", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("目标帧", packet.Header.FrameIndex))
-			depacketizer.WaitingForIdrFrame = false
-		}
-		depacketizer.JumpToNextPacket(packet)
 	}
 	return packet
 }
@@ -591,8 +568,8 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				copy(buffer[i][:VideoHeaderLength], buffer[0][:VideoHeaderLength]) //拷贝头部数据
 				binary.LittleEndian.PutUint32(buffer[i][28:],
 					uint32(dataShards)<<22|uint32(i)<<12|uint32(idrData)<<11|uint32(fecPercentage)<<4|uint32(channelId)) //FecInfo 增加idr信息、通道信息
-				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))                                      //SequenceNumber
-				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8)                                     //streamPacketIndex 这个也需要变化
+				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))  //SequenceNumber
+				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8) //streamPacketIndex 这个也需要变化
 				buffer[i][16] = packetizer.PacketIndex
 				buffer[i][24] = 0 //这个属性是什么并不重要
 				buffer[i][26] = 0

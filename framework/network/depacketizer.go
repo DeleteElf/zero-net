@@ -112,8 +112,8 @@ func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 }
 
 func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
-	group, exists := d.Groups[packet.Header.GroupIdx]
 	isRtp := packet.Payload[0] == RtpHeader || packet.Payload[0] == VideoHeader
+	group, exists := d.Groups[packet.Header.GroupIdx]
 	if !exists {
 		totalShards := packet.Header.DataShards + packet.Header.ParityShards
 		group = &FecGroup{

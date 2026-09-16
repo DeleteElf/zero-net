@@ -330,36 +330,18 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 		return fmt.Errorf("无效的通道数据: %d", packet.Header.Ssrc)
 	}
 	depacketizer.RtpAddPacket(packet)
-
+	if packet.Header.Idr == 1 { //如果是 关键帧，则移动当前数据到本帧，并丢弃前面的数据,执行追帧
+		if depacketizer.WaitingForIdrFrame && packet.Header.BlockIdx == 0 {
+			slog.Debug("收到关键帧，正在执行追帧！", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("目标帧", packet.Header.FrameIndex))
+			depacketizer.WaitingForIdrFrame = false
+		}
+		depacketizer.JumpToNextPacket(packet)
+	}
 	for {
 		nextGroup, exists := depacketizer.Groups[depacketizer.CurrentGroupId]
 		if !exists {
-			// 不能快进，否则会有杂音
-			//if packet.Header.Header == 0x80 { //音频数据包
-			//	if utils.IsBefore8(depacketizer.CurrentGroupId, packet.Header.GroupIdx) { //只需要处理数据包比当前待处理的还新，这一个问题
-			//		slog.Debug("收到了新的音频，但是不是期望的音频", slog.Any("target", depacketizer.CurrentGroupId),
-			//			slog.Any("received", packet.Header.GroupIdx))
-			//		tempGroup := depacketizer.Groups[packet.Header.GroupIdx]
-			//		if tempGroup.Received >= tempGroup.ShardCount { //新的已经接收满了
-			//			target := uint16(packet.Header.GroupIdx)
-			//			if packet.Header.GroupIdx < depacketizer.CurrentGroupId {
-			//				target += math.MaxUint8
-			//			}
-			//			for i := uint16(depacketizer.CurrentGroupId); i < target; i++ {
-			//				group := depacketizer.Groups[uint8(i)]
-			//				if group != nil {
-			//					sc.processAudioPacket(depacketizer.Groups[uint8(i)])
-			//				}
-			//			}
-			//			slog.Debug("新的音频数据已经满足解包，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
-			//			depacketizer.JumpToNextGroup(packet.Header.GroupIdx, packet.Header.FrameIndex)
-			//			continue
-			//		}
-			//	}
-			//}
 			break // 下一个组还没到来，退出循环
 		}
-
 		// 如果当前等待的组包数量还不足以解包，直接中断等待下一个网络包到达，切勿死循环！
 		header := nextGroup.HeaderSample //连续组装，不能使用packet，而应该从当前分组取样本
 		if nextGroup.Received < header.DataShards {
