@@ -30,8 +30,6 @@ type FecPacketHeader struct {
 	SequenceNumber uint16
 	//是否关键帧，如果不是关键帧，则只能依赖超时来跳过，起始位置10
 	Idr uint8
-	//总分块数
-	BlockCount uint8
 	//分块索引,默认为0 起始位置11
 	BlockIdx uint8
 	//分组的编号，主要用于重组，8个字节，考虑到可能会播放很久,GroupId并不等于FrameIndex，一个数据包可能被拆成多个分组,起始位置12
@@ -48,6 +46,10 @@ type FecPacketHeader struct {
 	Total uint32
 	//数据包体长度 2个字节,起始位置24
 	Length uint16
+	//总分块数
+	BlockCount uint8
+	//包头长度
+	HeaderSize uint8
 }
 
 type FecPacket struct {

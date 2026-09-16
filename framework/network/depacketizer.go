@@ -114,35 +114,6 @@ func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 	group, exists := d.Groups[packet.Header.GroupIdx]
 	isRtp := packet.Payload[0] == RtpHeader || packet.Payload[0] == VideoHeader
-	headerSize := FecPacketHeaderLength
-	if isRtp { //如果判定是rtp包，我们就需要预处理一下数据，方便后期补充rtp包
-		switch packet.Payload[1] {
-		case AudioHeader: //标准音频
-			headerSize = RtpHeaderLength
-		case AudioDynamicHeader: //动态音频
-			headerSize = AudioHeaderLength
-		default: //其他都是视频 视频数据的rtp包数据都是一样的
-			headerSize = VideoHeaderLength
-		}
-	}
-	if packet.Payload == nil {
-		slog.Debug("致命错误，完全不知道为什么是空的！！！")
-		return false
-	}
-	if len(packet.Payload) <= headerSize {
-		slog.Debug("致命错误，完全不知道为什么更小！！！", slog.Any("data", packet.Payload))
-		return false
-	}
-	length := len(packet.Payload[headerSize:])
-	if int(packet.Header.Length) != length { //数据包载体长度不一致，则丢弃
-		slog.Debug("数据长度不一致，丢弃！", slog.Any("channel", packet.Header.ChannelId),
-			slog.Any("ssrc", packet.Header.Ssrc),
-			slog.Any("groupId", packet.Header.GroupIdx),
-			slog.Any("shardIndex", packet.Header.ShardIdx),
-			slog.Any("targetLength", packet.Header.Length),
-			slog.Int("shardDataLength", len(packet.Payload[headerSize:])))
-		return false
-	}
 	if !exists {
 		totalShards := packet.Header.DataShards + packet.Header.ParityShards
 		group = &FecGroup{
@@ -152,9 +123,9 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 			//GroupID: packet.Header.GroupIdx, DataShards: packet.Header.DataShards, ParityShards: packet.Header.ParityShards,
 			//Total: packet.Header.Total, Received: 0, CreatedAt: time.Now(),
 		}
-		if len(packet.Payload) > headerSize {
+		if len(packet.Payload) > int(packet.Header.HeaderSize) {
 			if isRtp {
-				group.HeaderTemplate = packet.Payload[:headerSize]
+				group.HeaderTemplate = packet.Payload[:packet.Header.HeaderSize]
 			} else {
 				slog.Debug("数据包校验失败", slog.Any("group", group), slog.Any("data", packet.Payload))
 				return false
@@ -165,9 +136,10 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 		}
 		d.Groups[packet.Header.GroupIdx] = group
 	}
+
 	if group.Packets[packet.Header.ShardIdx] == nil { //不接收一样的数据包,通过Packet来判断，shards因为需要用于恢复，这里不进行判断
-		group.Shards[packet.Header.ShardIdx] = packet.Payload[headerSize:] //只加入验证过的数据
-		group.Packets[packet.Header.ShardIdx] = packet                     // 记录原始包指针
+		group.Shards[packet.Header.ShardIdx] = packet.Payload[packet.Header.HeaderSize:] //只加入验证过的数据
+		group.Packets[packet.Header.ShardIdx] = packet                                   // 记录原始包指针
 		if !group.HasParityShard && packet.Header.ShardIdx >= packet.Header.DataShards {
 			group.HasParityShard = true
 		}
