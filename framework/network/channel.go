@@ -211,7 +211,6 @@ func (sc *StreamChannel) notifyFrameLost(ssrc uint8, frameIndex uint32, speculat
 	//todo:notifyFrameLost(trackIndex,queue->currentFrameNumber, true);
 	depacketizer := sc.Depacketizers[ssrc]
 	if !depacketizer.WaitingForIdrFrame {
-		//LC_ASSERT(depacketizer->waitingForRefInvalFrame);
 		message := "发送针对不可恢复帧的RFI请求"
 		if speculative {
 			message = "针对预测的帧丢失发送推测性信息请求（RFI）"
@@ -269,6 +268,8 @@ func (sc *StreamChannel) requestRfiFrame(ssrc uint8, start, end uint32) {
 
 // 请求关键帧
 func (sc *StreamChannel) requestIdrFrame(ssrc uint8) {
+	depacketizer := sc.Depacketizers[ssrc]
+	depacketizer.WaitingForIdrFrame = true //标记成等待关键帧
 	data := make([]byte, 4)
 	binary.LittleEndian.PutUint16(data[0:], 0x0302)       //报头 IDX_REQUEST_IDR_FRAME
 	binary.LittleEndian.PutUint16(data[2:], uint16(ssrc)) //start
@@ -440,6 +441,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			}
 			//slog.Debug("执行Fec解包逻辑", slog.Any("groupId", header.GroupIdx))
 		}
+		depacketizer.DoNextGroup(nextGroup.HeaderSample.BlockCount) //解包成功就直接进入下一帧，免得再接收多余的帧
 		//暂时只支持97和127的音频
 		if nextGroup.HeaderTemplate[0] == RtpHeader && (nextGroup.HeaderTemplate[1] == AudioHeader || nextGroup.HeaderTemplate[1] == AudioDynamicHeader) {
 			sc.processAudioPacket(nextGroup)
@@ -521,8 +523,6 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 			//slog.Debug("fec重组了一条数据", slog.Any("frame", frameBuf.String()))
 			sc.handleReaderToChannel(nextGroup.HeaderSample.Ssrc, bytes.NewReader(frameBuf.Bytes()), frameBuf.Len())
 		}
-		//执行完再处理
-		depacketizer.DoNextGroup(nextGroup.HeaderSample.BlockCount)
 	}
 	return nil
 }
