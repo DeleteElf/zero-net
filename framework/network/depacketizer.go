@@ -10,16 +10,16 @@ import (
 
 // FecGroup 用于收集和组装同一 GroupID 的分片
 type FecGroup struct {
-	HeaderSample    *FecPacketHeader
-	HeaderTemplate  []byte
-	Shards          [][]byte // 槽位数组，长度为 DataShards + ParityShards
-	Packets         []*FecPacket
-	Received        uint8     // 当前已收到的有效分片数
-	HasParityShard  bool      //是否包含奇偶校验分片
-	ExpiredAt       time.Time //预期销毁时间
-	OosTime         time.Time //当前分组的首个数据包到达时间
-	ShardCount      uint8     //当前分组的数据分片数量
-	ShardDataLength uint16
+	HeaderSample   *FecPacketHeader
+	HeaderTemplate []byte
+	Shards         [][]byte // 槽位数组，长度为 DataShards + ParityShards
+	Packets        []*FecPacket
+	Received       uint8 // 当前已收到的有效分片数
+	HasParityShard bool  //是否包含奇偶校验分片
+	//ExpiredAt        time.Time //预期销毁时间
+	OosTimeExpiredAt time.Time //当前分组的首个数据包到达时间
+	ShardCount       uint8     //当前分组的数据分片数量
+	ShardDataLength  uint16
 	//计算起始的第一个
 	StartSequenceNumber uint16
 	//最大的序列号
@@ -65,10 +65,13 @@ func NewDepacketizer() *Depacketizer {
 	}
 }
 
-func (d *Depacketizer) JumpToNextIdrPacket(p *FecPacket) {
+func (d *Depacketizer) JumpToNextPacket(p *FecPacket) {
 	if p.Header.BlockIdx == 0 && utils.IsBefore8(d.CurrentGroupId, p.Header.GroupIdx) { //如果是比当前更新的关键帧
-		slog.Debug("帧接收新的关键帧，跳到！", slog.Any("channel", p.Header.ChannelId),
-			slog.Any("groupId", p.Header.GroupIdx))
+		if p.Header.Idr == 1 {
+			slog.Debug("接收新的关键帧，跳到目标帧！", slog.Any("channel", p.Header.ChannelId), slog.Any("groupId", p.Header.GroupIdx))
+		} else {
+			slog.Debug("跳到目标帧！", slog.Any("channel", p.Header.ChannelId), slog.Any("groupId", p.Header.GroupIdx))
+		}
 		d.jumpToNextGroupInternal(p.Header.GroupIdx, p.Header.FrameIndex)
 	}
 }
@@ -99,8 +102,6 @@ func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 	d.CurrentGroupId++
 	d.CurrentBlockIndex++
 	d.MissingPackets = 0
-	//d.ReportedLostFrame = false
-	//d.ReceivedOosData = false
 	if d.CurrentBlockIndex >= blockCount { //执行下一帧
 		for i := 0; i < int(d.CurrentBlockIndex); i++ { //删除当前帧的缓存
 			delete(d.Groups, d.CurrentGroupId-d.CurrentBlockIndex+uint8(i))
@@ -143,18 +144,11 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 		return false
 	}
 	if !exists {
-		expireTime := MessageExpireTime
-		if isRtp {
-			expireTime = AudioExpireTime
-			if packet.Payload[0] == VideoHeader {
-				expireTime = VideoExpireTime
-			}
-		}
 		totalShards := packet.Header.DataShards + packet.Header.ParityShards
 		group = &FecGroup{
-			HeaderSample: &packet.Header, ExpiredAt: time.Now().Add(expireTime),
+			HeaderSample: &packet.Header, OosTimeExpiredAt: time.Now().Add(AudioOosExpireTime), // ExpiredAt: time.Now().Add(expireTime),
 			Shards: make([][]byte, totalShards), Packets: make([]*FecPacket, totalShards),
-			OosTime: time.Now(), ShardCount: packet.Header.DataShards, ShardDataLength: packet.Header.Length,
+			ShardCount: packet.Header.DataShards, ShardDataLength: packet.Header.Length,
 			//GroupID: packet.Header.GroupIdx, DataShards: packet.Header.DataShards, ParityShards: packet.Header.ParityShards,
 			//Total: packet.Header.Total, Received: 0, CreatedAt: time.Now(),
 		}

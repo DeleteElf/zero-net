@@ -309,12 +309,9 @@ func (sc *StreamChannel) processAudioPacket(group *FecGroup) {
 }
 
 func (sc *StreamChannel) CheckDataReceiveTimeout(group *FecGroup, depacketizer *Depacketizer) bool {
-	if group.ExpiredAt.Before(time.Now()) { //如果已经过期，则不再等待，直接接收下一个
-		if group.HeaderTemplate[0] == RtpHeader && //音频数据是陆续发送的，我们允许按时间递增等待
-			(group.HeaderTemplate[1] == AudioHeader || group.HeaderTemplate[1] == AudioDynamicHeader) {
-			sc.processAudioPacket(group)
-		}
-		slog.Debug("帧接收超时丢弃！", slog.Int("channel", sc.ChannelId),
+	if group.OosTimeExpiredAt.Before(time.Now()) { //如果已经过期，则不再等待，直接接收下一个
+		sc.processAudioPacket(group)
+		slog.Debug("音频帧接收超时丢弃！", slog.Int("channel", sc.ChannelId),
 			slog.Any("groupId", depacketizer.CurrentGroupId), slog.Any("已接收", group.Received),
 			slog.Any("合计", len(group.Shards)))
 		depacketizer.DoNextGroup(group.HeaderSample.BlockCount)

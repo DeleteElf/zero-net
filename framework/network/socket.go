@@ -297,7 +297,8 @@ func (s *Socket) InitFecParam(channelId int) error {
 				packetizer.ParityShards[i] = make([]byte, config.FecPacketSize)
 			}
 			slog.Debug("音频奇偶校验缓存已经分配！")
-			s.StreamChannels[channelId].Depacketizers[0].JumpToNextGroup(100, 100) //音频前100个可能会比屏幕更早出来，我们直接跳过，丢弃
+			//这里需要注意，分组从1开始，音频并没有实际使用frameIndex，给个随意数字即可
+			s.StreamChannels[channelId].Depacketizers[0].JumpToNextGroup(40, 40) //音频前40个可能会比屏幕更早出来，我们直接跳过，丢弃
 		}
 	}
 	s.StreamChannels[channelId].Level = config.FecEnableLevel //传递控制级别进入
@@ -431,7 +432,7 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 	//检查解包器是否存在
 	depacketizer, exists := s.StreamChannels[result.Header.ChannelId].Depacketizers[result.Header.Ssrc]
 	if !exists {
-		depacketizer = NewDepacketizer()
+		depacketizer = NewDepacketizer() //实时创建第2个ssrc之后的解包器
 		s.StreamChannels[result.Header.ChannelId].Depacketizers[result.Header.Ssrc] = depacketizer
 	}
 
@@ -447,7 +448,7 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 			slog.Debug("收到关键帧，正在执行追帧！", slog.Any("ssrc", result.Header.Ssrc), slog.Any("目标帧", result.Header.FrameIndex))
 			depacketizer.WaitingForIdrFrame = false
 		}
-		depacketizer.JumpToNextIdrPacket(result)
+		depacketizer.JumpToNextPacket(result)
 	}
 	return result
 }

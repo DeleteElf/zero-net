@@ -26,15 +26,15 @@ const (
 	CustomFecHeader   = 0x81
 	CustomMessageType = 0x11
 
-	MessageExpireTime  = 200 * time.Millisecond
-	AudioExpireTime    = 100 * time.Millisecond
-	VideoExpireTime    = 100 * time.Millisecond
-	AudioOosExpireTime = 100 * time.Millisecond
-	VideoOosExpireTime = 500 * time.Millisecond
+	//MessageExpireTime  = 200 * time.Millisecond
+	//AudioExpireTime    = 100 * time.Millisecond
+	//VideoExpireTime    = 100 * time.Millisecond
+	AudioOosExpireTime = 50 * time.Millisecond
+	//VideoOosExpireTime = 500 * time.Millisecond
 	// AudioDataTime 音频数据包的间隔时长
 	AudioDataTime = 10 * time.Millisecond
 
-	SPECULATIVE_RFI_COOLDOWN_PERIOD_MS = 300000
+	//SPECULATIVE_RFI_COOLDOWN_PERIOD_MS = 300000
 	SPECULATIVE_RFI_COOLDOWN_PERIOD_US = 300000000
 )
 
