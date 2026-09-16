@@ -45,9 +45,9 @@ const (
 	FecDisabled FecLevel = iota
 	// FecDepacketizeKeepRtpPacketAndSize 保留RtpPacket结构和大小，仅执行fec修复
 	FecDepacketizeKeepRtpPacketAndSize
-	// FecDepacketizeKeepRtpPacket 保留RtpPacket结构，除了执行fec修复外，会执行解包，将整个block分块数据拼接成大数据包,这个模式会修改rtp的数据格式
+	// FecDepacketizeKeepRtpPacket 最佳方案。保留RtpPacket结构，除了执行fec修复外，会执行解包，将整个block分块数据拼接成大数据包,这个模式会修改rtp的数据格式，如果是音频的话，空包也不会保留大小
 	FecDepacketizeKeepRtpPacket
-	// FecDepacketizeKeepRtpData 去掉Rtp数据包结构，仅保留拼接好的视频编码数据,与 reedsolomon 配合性能最佳，不需要恢复rtp结构
+	// FecDepacketizeKeepRtpData 最高性能，因为直接使用分片数据即可，去掉Rtp数据包结构，仅保留拼接好的视频编码数据,与 reedsolomon 配合性能最佳，不需要恢复rtp结构
 	FecDepacketizeKeepRtpData
 )
 
@@ -83,7 +83,7 @@ func (c *StreamConfig) SetStreamType(t StreamType) {
 		c.Type = t
 		switch c.Type {
 		case Audio: //音频，默认50%
-			c.FecEnableLevel = FecDepacketizeKeepRtpData
+			c.FecEnableLevel = FecDepacketizeKeepRtpPacket
 			c.DataShards = 4
 			c.ParityShards = 2
 		case Video: //视频，默认30%

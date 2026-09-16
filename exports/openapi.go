@@ -332,9 +332,9 @@ func socketChannelReceive(ctx framework.Closeable, socket *network.Socket, chann
 		copySize = min(copySize, bufferMaxSize) //修改成根据缓冲区大小来读取数据
 	}
 	if copySize > 0 {
-		if bufferMaxSize > 0 { //将数据写入c++的byte[]中
+		if bufferMaxSize > 0 && data.ptr != nil { //将数据写入c++的byte[]中
 			//方案1
-			goBuf := unsafe.Slice((*byte)(unsafe.Pointer(data.ptr)), int(copySize))
+			goBuf := unsafe.Slice((*byte)(unsafe.Pointer(data.ptr)), copySize)
 			_, err := io.ReadFull(stream.Reader, goBuf)
 			//slog.Debug("正在读取数据包", slog.Any("读取的长度", size), slog.Any("内容", goBuf))
 			if err != nil && err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {

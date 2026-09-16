@@ -139,23 +139,23 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 	if cli.StreamConfigs == nil { //如果没有配置，则默认生成配置
 		cli.StreamConfigs = make([]network.StreamConfig, channelCount)
 	}
-	if cli.SupportFec { //如果启动了Fec，我们需要对fec的配置进行检查
-		for i := 0; i < channelCount; i++ {
-			switch cli.StreamConfigs[i].Type {
-			//case network.Video: //客户端不需要向服务端发送视频数据，这里只有心跳包
-			//	cli.StreamConfigs[i].DataShards = 10
-			//	cli.StreamConfigs[i].ParityShards = 3
-			//	cli.StreamConfigs[i].FecLevel = true
-			//	break
-			case network.Audio: //客户端向服务端发送的所有数据里，只有音频需要fec
-				cli.StreamConfigs[i].DataShards = 4
-				cli.StreamConfigs[i].ParityShards = 2
-				cli.StreamConfigs[i].FecEnableLevel = network.FecDepacketizeKeepRtpData //音频保留rtp数据即可
-			default:
-				break
-			}
-		}
-	}
+	//if cli.SupportFec { //如果启动了Fec，我们需要对fec的配置进行检查
+	//	for i := 0; i < channelCount; i++ {
+	//		switch cli.StreamConfigs[i].Type {
+	//		//case network.Video: //客户端不需要向服务端发送视频数据，这里只有心跳包
+	//		//	cli.StreamConfigs[i].DataShards = 10
+	//		//	cli.StreamConfigs[i].ParityShards = 3
+	//		//	cli.StreamConfigs[i].FecLevel = true
+	//		//	break
+	//		case network.Audio: //客户端向服务端发送的所有数据里，只有音频需要fec
+	//			cli.StreamConfigs[i].DataShards = 4
+	//			cli.StreamConfigs[i].ParityShards = 2
+	//			cli.StreamConfigs[i].FecEnableLevel = network.FecDepacketizeKeepRtpPacket //音频保留rtp数据即可
+	//		default:
+	//			break
+	//		}
+	//	}
+	//}
 	cli.Socket = network.NewSocket(cli.Id, channelCount, cli.QuicConfig.InitialPacketSize, onDisconnect)
 	cli.Socket.FecLimitPacketSize = cli.FecLimitPacketSize
 	cli.Socket.StreamConfigs = cli.StreamConfigs

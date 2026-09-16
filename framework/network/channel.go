@@ -286,15 +286,19 @@ func (sc *StreamChannel) processAudioPacket(group *FecGroup) {
 			}
 			sc.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(group.Shards[i]), int(group.ShardDataLength))
 		}
-	case FecDepacketizeKeepRtpPacket, FecDepacketizeKeepRtpPacketAndSize: //音频的处置方式一样
+	case FecDepacketizeKeepRtpPacket, FecDepacketizeKeepRtpPacketAndSize: //音频的处置方式
 		//case FecDepacketizeKeepRtpPacketAndSize:
 		for i := 0; i < int(group.ShardCount); i++ {
 			var resultData []byte
 			if group.Packets[i] == nil {
-				if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-					group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
+				if sc.Level == FecDepacketizeKeepRtpPacketAndSize {
+					if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
+						group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
+					}
+					resultData = RebuildRtpPacket(group.HeaderTemplate, group.Shards[i], uint8(i), group.HeaderSample.DataShards)
+				} else { //处理超时，直接丢入一个rtp空包
+					resultData = RebuildRtpPacket(group.HeaderTemplate, []byte{}, uint8(i), group.HeaderSample.DataShards)
 				}
-				resultData = RebuildRtpPacket(group.HeaderTemplate, group.Shards[i], uint8(i), group.HeaderSample.DataShards)
 			} else { //清除fecPercentage的数据
 				resultData = group.Packets[i].Payload //直接使用原始数据包，实现零拷贝
 			}
