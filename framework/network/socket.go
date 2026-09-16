@@ -419,7 +419,9 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		slog.Debug("未知数据包，丢弃", slog.Any("data", packet.Payload))
 		return nil
 	}
-	if size <= int(packet.Header.HeaderSize) || int(packet.Header.Length)+int(packet.Header.HeaderSize) != size {
+	//校验数据，数据长度大于整个数据包长度，校验不通过
+	//数据长度+头长度 不等于数据包长度，校验不通过，这个只有自定义的fec数据包支持
+	if size <= int(packet.Header.Length) || int(packet.Header.Length)+int(packet.Header.HeaderSize) != size {
 		slog.Debug("数据长度不一致，丢弃！", slog.Any("channel", packet.Header.ChannelId),
 			slog.Any("ssrc", packet.Header.Ssrc),
 			slog.Any("groupId", packet.Header.GroupIdx),
@@ -568,8 +570,8 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				copy(buffer[i][:VideoHeaderLength], buffer[0][:VideoHeaderLength]) //拷贝头部数据
 				binary.LittleEndian.PutUint32(buffer[i][28:],
 					uint32(dataShards)<<22|uint32(i)<<12|uint32(idrData)<<11|uint32(fecPercentage)<<4|uint32(channelId)) //FecInfo 增加idr信息、通道信息
-				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))  //SequenceNumber
-				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8) //streamPacketIndex 这个也需要变化
+				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))                                      //SequenceNumber
+				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8)                                     //streamPacketIndex 这个也需要变化
 				buffer[i][16] = packetizer.PacketIndex
 				buffer[i][24] = 0 //这个属性是什么并不重要
 				buffer[i][26] = 0
