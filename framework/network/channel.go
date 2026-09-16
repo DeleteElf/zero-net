@@ -11,7 +11,6 @@ import (
 	"github.com/quic-go/quic-go"
 	"io"
 	"log/slog"
-	"math"
 	"sync"
 	"time"
 )
@@ -335,28 +334,29 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 	for {
 		nextGroup, exists := depacketizer.Groups[depacketizer.CurrentGroupId]
 		if !exists {
-			if packet.Header.Header == 0x80 { //音频数据包
-				if utils.IsBefore8(depacketizer.CurrentGroupId, packet.Header.GroupIdx) { //只需要处理数据包比当前待处理的还新，这一个问题
-					slog.Debug("收到了新的音频，但是不是期望的音频", slog.Any("target", depacketizer.CurrentGroupId),
-						slog.Any("received", packet.Header.GroupIdx))
-					tempGroup := depacketizer.Groups[packet.Header.GroupIdx]
-					if tempGroup.Received >= tempGroup.ShardCount { //新的已经接收满了
-						target := uint16(packet.Header.GroupIdx)
-						if packet.Header.GroupIdx < depacketizer.CurrentGroupId {
-							target += math.MaxUint8
-						}
-						for i := uint16(depacketizer.CurrentGroupId); i < target; i++ {
-							group := depacketizer.Groups[uint8(i)]
-							if group != nil {
-								sc.processAudioPacket(depacketizer.Groups[uint8(i)])
-							}
-						}
-						slog.Debug("新的音频数据已经满足解包，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
-						depacketizer.JumpToNextGroup(packet.Header.GroupIdx, packet.Header.FrameIndex)
-						continue
-					}
-				}
-			}
+			// 不能快进，否则会有杂音
+			//if packet.Header.Header == 0x80 { //音频数据包
+			//	if utils.IsBefore8(depacketizer.CurrentGroupId, packet.Header.GroupIdx) { //只需要处理数据包比当前待处理的还新，这一个问题
+			//		slog.Debug("收到了新的音频，但是不是期望的音频", slog.Any("target", depacketizer.CurrentGroupId),
+			//			slog.Any("received", packet.Header.GroupIdx))
+			//		tempGroup := depacketizer.Groups[packet.Header.GroupIdx]
+			//		if tempGroup.Received >= tempGroup.ShardCount { //新的已经接收满了
+			//			target := uint16(packet.Header.GroupIdx)
+			//			if packet.Header.GroupIdx < depacketizer.CurrentGroupId {
+			//				target += math.MaxUint8
+			//			}
+			//			for i := uint16(depacketizer.CurrentGroupId); i < target; i++ {
+			//				group := depacketizer.Groups[uint8(i)]
+			//				if group != nil {
+			//					sc.processAudioPacket(depacketizer.Groups[uint8(i)])
+			//				}
+			//			}
+			//			slog.Debug("新的音频数据已经满足解包，跳到最新音频数据", slog.Any("groupId", packet.Header.GroupIdx))
+			//			depacketizer.JumpToNextGroup(packet.Header.GroupIdx, packet.Header.FrameIndex)
+			//			continue
+			//		}
+			//	}
+			//}
 			break // 下一个组还没到来，退出循环
 		}
 
@@ -367,7 +367,7 @@ func (sc *StreamChannel) FecDecode(packet *FecPacket) error {
 				if sc.CheckDataReceiveTimeout(nextGroup, depacketizer) {
 					continue
 				}
-			} else { //视频数据包
+			} else {                                                                                          //视频数据包
 				if depacketizer.StartFrameIndex != depacketizer.CurrentFrameIndex && nextGroup.Received > 0 { //重新计算当前分组的丢包情况
 					outOfSequence := false
 					count := (nextGroup.MaxSequenceNumber - nextGroup.StartSequenceNumber + 1) & 0xFFFF
