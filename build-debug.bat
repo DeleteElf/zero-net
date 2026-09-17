@@ -21,7 +21,7 @@ echo 正在创建版本信息
 windres -i ./app.rc -o ./main/app.syso
 
 echo 正在生成dll
-go build -buildmode=c-shared -o ./output/net.dll ./main
+go build -gcflags="all=-N -l" -buildmode=c-shared -o ./output/net.dll ./main
 
 echo 正在生成lib
 set PATH=%PATH%;C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64

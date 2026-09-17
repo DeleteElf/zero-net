@@ -53,7 +53,8 @@ type FecPacketHeader struct {
 }
 
 type FecPacket struct {
-	Header FecPacketHeader
+	Header    FecPacketHeader
+	HeaderRaw []byte
 	//数据内容载体
 	Payload []byte
 }

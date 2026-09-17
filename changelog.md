@@ -1,6 +1,7 @@
 ### 版本变更日志
 #### 1.0.26.091701
 1. 完成视频FecDepacketizeKeepRtpPacket模式的功能。
+2. 每个解包器独立协程执行解包，防止因某个逻辑卡顿影响其他通道的畅通。
 
 #### 1.0.26.091601
 1. 完成音频FecDepacketizeKeepRtpPacket模式的功能。
