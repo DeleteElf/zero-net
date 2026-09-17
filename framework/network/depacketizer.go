@@ -115,6 +115,7 @@ func (d *Depacketizer) jumpToNextGroupInternal(groupId uint8, frameIndex uint32)
 	d.groupLock.Lock()
 	defer d.groupLock.Unlock()
 	start := d.CurrentGroupId - d.CurrentBlockIndex
+	d.CurrentGroupId = groupId
 	target := int(groupId)
 	if groupId < start { //考虑溢出问题
 		target = int(groupId) + math.MaxUint8
@@ -122,7 +123,6 @@ func (d *Depacketizer) jumpToNextGroupInternal(groupId uint8, frameIndex uint32)
 	for i := int(start); i < target; i++ {
 		delete(d.Groups, uint8(i))
 	}
-	d.CurrentGroupId = groupId
 	d.CurrentFrameIndex = frameIndex //如果有用，需要后续自己修复
 	d.CurrentBlockIndex = 0          //如果有用，需要后续自己修复
 	d.MissingPackets = 0
@@ -131,12 +131,13 @@ func (d *Depacketizer) jumpToNextGroupInternal(groupId uint8, frameIndex uint32)
 func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 	d.groupLock.Lock()
 	defer d.groupLock.Unlock()
+	start := d.CurrentGroupId - d.CurrentBlockIndex
 	d.CurrentGroupId++
 	d.CurrentBlockIndex++
 	d.MissingPackets = 0
 	if d.CurrentBlockIndex >= blockCount { //执行下一帧
 		for i := 0; i < int(d.CurrentBlockIndex); i++ { //删除当前帧的缓存
-			delete(d.Groups, d.CurrentGroupId-d.CurrentBlockIndex+uint8(i))
+			delete(d.Groups, start+uint8(i))
 		}
 		d.CurrentBlockIndex = 0
 		d.CurrentFrameIndex++
@@ -146,7 +147,7 @@ func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 	d.groupLock.Lock()
 	group, exists := d.Groups[packet.Header.GroupIdx]
-	if !exists { //第2中情况是循环了一圈回来，仍没有被处置？ || group.HeaderSample.FrameIndex != packet.Header.FrameIndex
+	if !exists || (packet.Header.Header == VideoHeader && group.HeaderSample.FrameIndex != packet.Header.FrameIndex) { //第2中情况是循环了一圈回来，仍没有被处置？
 		totalShards := packet.Header.DataShards + packet.Header.ParityShards
 		group = &FecGroup{
 			HeaderSample: &packet.Header, OosTimeExpiredAt: time.Now().Add(AudioOosExpireTime), // ExpiredAt: time.Now().Add(expireTime),
@@ -281,6 +282,7 @@ func (d *Depacketizer) Decode() {
 				if utils.IsBefore8(group.HeaderSample.GroupIdx, d.CurrentGroupId) {
 					delete(d.Groups, key)
 				}
+				//if(group.HeaderSample.Header==VideoHeader&& utils.IsBefore32(group.HeaderSample.FrameIndex, d.CurrentFrameIndex))
 			}
 			nextGroup, exists := d.Groups[d.CurrentGroupId]
 			d.groupLock.Unlock()
