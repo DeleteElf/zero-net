@@ -87,7 +87,7 @@ func (c *StreamConfig) SetStreamType(t StreamType) {
 			c.DataShards = 4
 			c.ParityShards = 2
 		case Video: //视频，默认30%
-			c.FecEnableLevel = FecDepacketizeKeepRtpPacketAndSize
+			c.FecEnableLevel = FecDepacketizeKeepRtpPacket
 			c.DataShards = 10
 			c.ParityShards = 3
 			break

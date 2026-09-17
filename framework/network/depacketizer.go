@@ -42,7 +42,8 @@ type Depacketizer struct {
 	MaxFrameIndex uint32
 	//丢包数量
 	MissingPackets uint16
-
+	//重新构建的序列
+	RebuildSequenceNumber uint16
 	// 是否已经报告丢帧
 	ReportedLostFrame bool
 	//是否收到Oos数据
