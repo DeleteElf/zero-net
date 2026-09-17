@@ -1,7 +1,9 @@
 ### 版本变更日志
+#### 1.0.26.091701
+1. 完成视频FecDepacketizeKeepRtpPacket模式的功能。
 
 #### 1.0.26.091601
-1. 完成FecDepacketizeKeepRtpPacket模式的功能。
+1. 完成音频FecDepacketizeKeepRtpPacket模式的功能。
 2. 去掉了音频快进的功能支持，现在仅按oosTimeExpireAt处置过期，并补充空数据包。
 
 #### 1.0.26.091501
