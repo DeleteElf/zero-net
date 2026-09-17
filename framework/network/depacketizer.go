@@ -144,22 +144,10 @@ func (d *Depacketizer) DoNextGroup(blockCount uint8) {
 }
 
 func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
-	//if packet.Payload == nil || len(packet.Payload) < 70 {
-	//	slog.Debug("数据长度错误，判定网络掉包，数据损坏，丢弃2", slog.Any("data", packet.Payload))
-	//	return false
-	//}
-	isRtp := packet.Payload[0] == RtpHeader || packet.Payload[0] == VideoHeader
-	if isRtp && packet.Header.Idr == 1 { //如果是 关键帧，则移动当前数据到本帧，并丢弃前面的数据,执行追帧
-		if d.WaitingForIdrFrame && packet.Header.BlockIdx == 0 {
-			slog.Debug("收到关键帧，正在执行追帧！", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("目标帧", packet.Header.FrameIndex))
-			d.WaitingForIdrFrame = false
-		}
-		d.JumpToNextPacket(packet)
-	}
-	totalShards := packet.Header.DataShards + packet.Header.ParityShards
 	d.groupLock.Lock()
 	group, exists := d.Groups[packet.Header.GroupIdx]
-	if !exists {
+	if !exists { //第2中情况是循环了一圈回来，仍没有被处置？ || group.HeaderSample.FrameIndex != packet.Header.FrameIndex
+		totalShards := packet.Header.DataShards + packet.Header.ParityShards
 		group = &FecGroup{
 			HeaderSample: &packet.Header, OosTimeExpiredAt: time.Now().Add(AudioOosExpireTime), // ExpiredAt: time.Now().Add(expireTime),
 			Shards: make([][]byte, totalShards), Packets: make([]*FecPacket, totalShards),
@@ -171,9 +159,16 @@ func (d *Depacketizer) RtpAddPacket(packet *FecPacket) bool {
 		d.Groups[packet.Header.GroupIdx] = group
 	}
 	d.groupLock.Unlock()
-	if packet.Header.ShardIdx >= totalShards {
+	if packet.Header.ShardIdx >= group.HeaderSample.DataShards+group.HeaderSample.ParityShards { //校验数据要使用分组的数据进行校验
 		slog.Debug("无效的shard索引", slog.Any("channel", packet.Header.ChannelId), slog.Any("ssrc", packet.Header.Ssrc),
-			slog.Any("groupId", packet.Header.GroupIdx), slog.Any("ShardIdx", packet.Header.ShardIdx))
+			slog.Any("groupId", packet.Header.GroupIdx), slog.Any("ShardIdx", packet.Header.ShardIdx),
+			slog.Any("DataShards", packet.Header.DataShards), slog.Any("ParityShards", packet.Header.ParityShards),
+			slog.Any("SequenceNumber", packet.Header.SequenceNumber), slog.Any("frameIndex", packet.Header.FrameIndex),
+
+			slog.Any("CurrentGroupId", d.CurrentGroupId), slog.Any("NextSequenceNumber", d.NextSequenceNumber),
+
+			slog.Any("Received", group.Received), slog.Any("groupFrameIndex", group.HeaderSample.FrameIndex),
+			slog.Any("groupDataShards", group.HeaderSample.DataShards), slog.Any("groupParityShards", group.HeaderSample.ParityShards))
 		return false
 	}
 	if group.Packets[packet.Header.ShardIdx] == nil { //不接收一样的数据包,通过Packet来判断，shards因为需要用于恢复，这里不进行判断
@@ -282,6 +277,11 @@ func (d *Depacketizer) Decode() {
 
 		for {
 			d.groupLock.Lock()
+			for key, group := range d.Groups { //执行循环删除，防止早期数据污染引发问题
+				if utils.IsBefore8(group.HeaderSample.GroupIdx, d.CurrentGroupId) {
+					delete(d.Groups, key)
+				}
+			}
 			nextGroup, exists := d.Groups[d.CurrentGroupId]
 			d.groupLock.Unlock()
 			if !exists {

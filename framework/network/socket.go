@@ -456,12 +456,23 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		//	slog.Any("packetGroupIndex", packet.Header.GroupIdx))
 		return nil
 	}
+	if packet.Payload[0] == VideoHeader && packet.Header.Idr == 1 { //如果是 关键帧，则移动当前数据到本帧，并丢弃前面的数据,执行追帧
+		if depacketizer.WaitingForIdrFrame && packet.Header.BlockIdx == 0 {
+			slog.Debug("收到关键帧，正在执行追帧！", slog.Any("ssrc", packet.Header.Ssrc), slog.Any("目标帧", packet.Header.FrameIndex))
+			depacketizer.WaitingForIdrFrame = false
+		}
+		depacketizer.JumpToNextPacket(packet)
+	}
 	if packet.Payload == nil || len(packet.Payload) < 70 {
 		slog.Debug("数据长度错误，判定网络掉包，数据损坏，丢弃", slog.Any("data", packet.Payload))
 		return nil
 	}
-	depacketizer.RtpAddPacket(packet) //加入到对应的解包器中
-	return packet
+	isValid := packet.Payload[0] == RtpHeader || packet.Payload[0] == VideoHeader || packet.Payload[0] == CustomFecHeader
+	if isValid { //合法的数据包才加入
+		depacketizer.RtpAddPacket(packet) //加入到对应的解包器中
+		return packet
+	}
+	return nil
 }
 
 func (s *Socket) SafeWaitMillisecond(timeout time.Duration) {
@@ -587,8 +598,8 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				copy(buffer[i][:VideoHeaderLength], buffer[0][:VideoHeaderLength]) //拷贝头部数据
 				binary.LittleEndian.PutUint32(buffer[i][28:],
 					uint32(dataShards)<<22|uint32(i)<<12|uint32(idrData)<<11|uint32(fecPercentage)<<4|uint32(channelId)) //FecInfo 增加idr信息、通道信息
-				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))  //SequenceNumber
-				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8) //streamPacketIndex 这个也需要变化
+				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))                                      //SequenceNumber
+				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8)                                     //streamPacketIndex 这个也需要变化
 				buffer[i][16] = packetizer.PacketIndex
 				buffer[i][24] = 0 //这个属性是什么并不重要
 				buffer[i][26] = 0
