@@ -457,10 +457,10 @@ func (d *Depacketizer) Decode() {
 					}
 				default:
 				}
-				if header.Idr == 1 {
-					slog.Debug("关键帧解码完成，向服务器发送ltr_ack！", slog.Any("ssrc", header.Ssrc), slog.Any("目标帧", header.FrameIndex))
-					d.StreamChannel.connectionReceivedCompleteFrame(header.Ssrc, header.FrameIndex, true)
-				}
+				//if header.Idr == 1 {
+				//	slog.Debug("关键帧解码完成，向服务器发送ltr_ack！", slog.Any("ssrc", header.Ssrc), slog.Any("目标帧", header.FrameIndex))
+				//	d.StreamChannel.connectionReceivedCompleteFrame(header.Ssrc, header.FrameIndex, true)
+				//}
 				//slog.Debug("fec完成重组", slog.Any("channel id", sc.ChannelId), slog.Any("groupId", header.GroupIdx))
 			} else {
 				//slog.Debug("fec收到意料外的数据", slog.Any("channel id", sc.ChannelId))
