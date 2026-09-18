@@ -3,11 +3,9 @@ module github.com/DeleteElf/zero-net
 go 1.25.0
 
 require (
-	github.com/deleteelf/goframework v0.0.0-20260514022631-5463c64eff1e
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/reedsolomon v1.14.1
 	github.com/pion/ice/v4 v4.4.1
-	github.com/pion/stun/v3 v3.1.6
 	github.com/pkg/errors v0.9.1
 	github.com/quic-go/quic-go v0.59.1
 )
