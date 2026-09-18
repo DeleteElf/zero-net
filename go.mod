@@ -8,6 +8,7 @@ require (
 	github.com/pion/ice/v4 v4.4.1
 	github.com/pkg/errors v0.9.1
 	github.com/quic-go/quic-go v0.59.1
+	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0
 )
 
 require (
