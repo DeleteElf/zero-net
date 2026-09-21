@@ -32,12 +32,10 @@ func TestWebSocketClient(t *testing.T) {
 		}
 		slog.Info("处理完消息", slog.String("msg", msg))
 	}
-	go func() {
-		err := client.Connect("wss://192.168.199.159:3005/device?type=device&apikey=575D6618206A2754", websocket.DefaultHeartMessage)
-		if err != nil {
-			slog.Error("连接发生错误", slog.Any("err", err))
-		}
-	}()
+	err := client.Connect("wss://192.168.199.159:3005/device?type=device&apikey=575D6618206A2754", websocket.DefaultHeartMessage)
+	if err != nil {
+		slog.Error("连接发生错误", slog.Any("err", err))
+	}
 	stopTime := time.Now().Add(2 * time.Minute)
 	for {
 		time.Sleep(1 * time.Second)

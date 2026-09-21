@@ -143,12 +143,10 @@ func TestIceServer(t *testing.T) {
 			}
 		}
 	}
-	go func() {
-		err := ws.Connect("wss://192.168.199.159:3005/device?type=device&apikey=575D6618206A2754", websocket.DefaultHeartMessage)
-		if err != nil {
-			slog.Error("连接发生错误", slog.Any("err", err))
-		}
-	}()
+	err := ws.Connect("wss://192.168.199.159:3005/device?type=device&apikey=575D6618206A2754", websocket.DefaultHeartMessage)
+	if err != nil {
+		slog.Error("连接发生错误", slog.Any("err", err))
+	}
 	testServer.OnAcceptSocket = func(sock *network.Socket) {
 		slog.Debug("新的客户端接入：", slog.String("id", sock.Id))
 		for i := 0; i < sock.ChannelCount; i++ {
@@ -161,7 +159,6 @@ func TestIceServer(t *testing.T) {
 			go messageHandler(testServer, sock, i)
 		}
 	}
-
 	for {
 		if restart {
 			time.Sleep(1 * time.Second)

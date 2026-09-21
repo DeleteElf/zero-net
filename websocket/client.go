@@ -113,7 +113,7 @@ func (c *Client) Connect(address, heartMessage string) error {
 			}
 		}
 	}()
-	c.Heart(c.HeartMessage)
+	go c.Heart(c.HeartMessage)
 	return nil
 }
 
@@ -209,7 +209,6 @@ func (c *Client) Disconnect() {
 }
 
 func (c *Client) ReconnectWorking() {
-	//for {
 	time.Sleep(1 * time.Second)
 	if c.Reconnect == true && c.Connected == false {
 		err := c.Connect(c.Address, c.HeartMessage)
@@ -217,8 +216,4 @@ func (c *Client) ReconnectWorking() {
 			slog.Error("重新连接发生错误", slog.Any("err", err))
 		}
 	}
-	//	if c.Reconnect == false || c.Connected {
-	//		break
-	//	}
-	//}
 }
