@@ -77,8 +77,7 @@ func (cli *Client) OnClosed() error {
 //
 // return: 返回错误
 func (cli *Client) ConnectByIce(conn net.PacketConn, dummyAddr net.Addr) error {
-	cli.NetConn = conn
-	return cli.ConnectToNet(3, nil, dummyAddr, func(sock *network.Socket) {
+	return cli.ConnectToNet(3, conn, dummyAddr, func(sock *network.Socket) {
 		slog.Debug("socket已经断开===》！", slog.String("id", sock.Id))
 	})
 }
@@ -105,7 +104,7 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 	if cli.Socket != nil {
 		return errors.New("当前客户端已经连接！")
 	}
-	if conn != nil {
+	if cli.NetConn == nil {
 		cli.NetConn = conn
 	}
 	cli.serverAddr = addr
@@ -125,6 +124,19 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 				ctrl := &network.NetStatusControl{ShowStatusLevel: network.StatusLevelLostPacket}
 				return network.NewNetStatusTracer(ctrl)
 			},
+		}
+	}
+	if conn != nil {
+		slog.Debug("正在为链接设置Tos")
+		// 2. 为 IPv4 数据包设置 DSCP / ToS 字段
+		p4 := ipv4.NewPacketConn(conn)
+		// DSCP 值示例：
+		// 46 (0xB8 >> 2) -> EF (Expedited Forwarding, 极速高优先级，常用于实时音视频/串流)
+		// 34 (0x88 >> 2) -> AF41 (高优先级数据)
+		// 注意：SetTOS 传入的是原始 8 位 IPv4 ToS 字节，DSCP 占据高 6 位，因此需要左移 2 位
+		dscpEF := 46 << 2
+		if err := p4.SetTOS(dscpEF); err != nil {
+			slog.Error("警告: 设置 IPv4 DSCP 失败 (可能需要管理员权限或系统支持):", slog.Any("err", err))
 		}
 	}
 	slog.Debug("正在远程连接", slog.Any("ServerAddress", cli.serverAddr))

@@ -347,16 +347,17 @@ func (d *Depacketizer) Decode() {
 			}
 
 			if nextGroup.HasParityShard { //包含奇偶校验分片，才执行
-				for i := 0; i < int(header.DataShards); i++ {
-					if nextGroup.Shards[i] == nil { // 丢失的分片：分配 maxLen 字节的零值切片供 RS 恢复
-						nextGroup.Shards[i] = make([]byte, nextGroup.ShardDataLength)
-					}
-					if len(nextGroup.Shards[i]) != int(nextGroup.ShardDataLength) {
-						slog.Debug("数据分片长度错误！", slog.Int("shardIndex", i),
-							slog.Any("targetLength", nextGroup.ShardDataLength),
-							slog.Int("shardDataLength", len(nextGroup.Shards[i])))
-					}
-				}
+				//for i := 0; i < int(header.DataShards); i++ {
+				//	if nextGroup.Shards[i] == nil { // 丢失的分片：分配 maxLen 字节的零值切片供 RS 恢复
+				//		nextGroup.Shards[i] = make([]byte, nextGroup.ShardDataLength)
+				//	}
+				//	if len(nextGroup.Shards[i]) != int(nextGroup.ShardDataLength) {
+				//		slog.Debug("数据分片长度错误！", slog.Int("shardIndex", i),
+				//			slog.Any("targetLength", nextGroup.ShardDataLength),
+				//			slog.Int("shardDataLength", len(nextGroup.Shards[i])))
+				//	}
+				//}
+				firstEmpty := nextGroup.Shards[0] == nil
 				// 关键优化：使用 ReconstructData 仅恢复数据分片，比 Reconstruct 省时省 CPU
 				encoder, err := d.GetFecEncoder(header.DataShards, header.ParityShards)
 				if err != nil {
@@ -376,6 +377,10 @@ func (d *Depacketizer) Decode() {
 					time.Sleep(time.Millisecond * 1) //等待1毫秒，再继续
 					break
 				}
+				if firstEmpty && (len(nextGroup.Shards[0]) == 0 || nextGroup.Shards[0][3] == 0) {
+					slog.Debug("Fec解包结果第一个数据分片错误！", slog.Any("长度", len(nextGroup.Shards[0])), slog.Any("shard", nextGroup.Shards[0]))
+				}
+
 				//slog.Debug("执行Fec解包逻辑", slog.Any("groupId", header.GroupIdx))
 			}
 			d.DoNextGroup(nextGroup.HeaderSample.BlockCount) //解包成功就直接进入下一帧，免得再接收多余的帧

@@ -17,7 +17,7 @@ import (
 )
 
 type AgentMessageCallbackFunc func(int, string)
-
+type AgentCallbackFunc func(*Agent)
 type Config struct {
 	Id       int64
 	MgrAddr  string           `json:"mgr_addr"`
@@ -48,6 +48,8 @@ type ManagePlatform struct {
 	heartTicker *time.Ticker
 	//Server          *server.Server //目前代理中心，只能在未建立quic通讯前打通路由，因此不能在此建立服务对象
 	lastMessageTime time.Time
+
+	OnAgentServerCreated AgentCallbackFunc
 }
 
 func NewManagePlatform(cfg *Config) *ManagePlatform {
@@ -210,8 +212,11 @@ func (mgr *ManagePlatform) ListenAgentConnect(onAcceptSocket, onDisconnect netwo
 				}
 				agent.Proxy = &proxyInfo
 				agent.Server = server.NewServer(agent.Socket, true)
+				if mgr.OnAgentServerCreated != nil {
+					mgr.OnAgentServerCreated(agent)
+				}
 				agent.Server.OnAcceptSocket = onAcceptSocket
-				go agent.Server.StartListen(onDisconnect)
+				go agent.Server.StartListenWithConn(onDisconnect, agent.Socket.Conn)
 				mgr.Agents[proxyInfo.Idx] = agent //连接成功即可
 				slog.Debug("代理服务创建成功！", slog.Int("idx", proxyInfo.Idx))
 			}

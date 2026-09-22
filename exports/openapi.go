@@ -180,7 +180,7 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 	}
 	socketConnectedCallback := func(sock *network.Socket) {
 		if clientCtx.SupportFec {
-			//slog.Debug("客户端提供Fec支持！")
+			slog.Debug("客户端启用了Fec解包支持！")
 			for i := 0; i < sock.ChannelCount; i++ {
 				sock.StreamConfigs[i].SetStreamType(network.StreamType(i)) //设置通道媒体类型
 				sock.StreamConfigs[i].FecPacketSize = clientCtx.FecBlockSize
@@ -222,7 +222,8 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 		agt, err := agent.NewAgent(clientCtx.ServerAddress, uint32(proxy.Idx), 0, cfg)
 		if err == nil && agt != nil {
 			sock := agt.Socket
-			err := clientCtx.ConnectToNet(3, sock, agt.RemoteAddress, func(sock *network.Socket) {
+			clientCtx.NetConn = sock
+			err := clientCtx.ConnectToNet(3, sock.Conn, agt.RemoteAddress, func(sock *network.Socket) {
 				if agt.Socket != nil {
 					slog.Debug("正在与代理断开连接...")
 					_ = agt.Socket.Close()
@@ -511,6 +512,7 @@ func ServerCreate(config *C.NetworkData) C.int {
 	serverCtx.OnAcceptSocket = func(sock *network.Socket) {
 		socketMap[sock.Id] = sock
 		if serverCtx.SupportFec {
+			slog.Debug("服务端直连模式启用了Fec解包支持！")
 			for i := 0; i < sock.ChannelCount; i++ {
 				sock.StreamConfigs[i].SetStreamType(network.StreamType(i))   //设置通道媒体类型
 				sock.StreamConfigs[i].FecPacketSize = serverCtx.FecBlockSize //将video流的fec块大小设定好
@@ -792,6 +794,20 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 	if managerCtx == nil {
 		return C.ErrorContext
 	}
+	managerCtx.OnAgentServerCreated = func(a *agent.Agent) {
+		//slog.Debug("正在为代理服务执行配置：", slog.Any("config", a.Config))
+		json := a.Config.Data
+		if json["fec"] != nil {
+			//slog.Debug("正在为代理服务配置fec：", slog.Any("fec", json))
+			a.Server.SupportFec = json["fec"].(bool)
+			if json["fec_bs"] != nil {
+				a.Server.FecBlockSize = uint16(json["fec_bs"].(float64))
+			}
+			if json["fec_min_pkts"] != nil {
+				a.Server.FecMinRequiredPackets = int(json["fec_min_pkts"].(float64))
+			}
+		}
+	}
 	go func() {
 		for {
 			if managerCtx == nil || managerCtx.IsClosed() { //如果服务已经关闭，则不再继续连接管理平台
@@ -802,6 +818,13 @@ func ProxyServerCreate(config *C.NetworkData) C.int {
 			err1 := managerCtx.ListenAgentConnect(func(sock *network.Socket) {
 				socketMap[sock.Id] = sock
 				slog.Debug("新的客户端接入：", slog.String("id", sock.Id))
+				if serverCtx.SupportFec {
+					slog.Debug("服务端代理模式启用了Fec解包支持！")
+					for i := 0; i < sock.ChannelCount; i++ {
+						sock.StreamConfigs[i].SetStreamType(network.StreamType(i))   //设置通道媒体类型
+						sock.StreamConfigs[i].FecPacketSize = serverCtx.FecBlockSize //将video流的fec块大小设定好
+					}
+				}
 				if onAcceptSocket != nil {
 					C.callMessageCallback(onAcceptSocket, C.CString(sock.Id))
 				}

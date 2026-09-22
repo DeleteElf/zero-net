@@ -91,11 +91,14 @@ func (s *Server) ConnectByIce(conn net.PacketConn) {
 }
 
 func (s *Server) StartListen(onDisconnect network.SocketCallbackFunc) {
+	s.StartListenWithConn(onDisconnect, nil)
+}
+func (s *Server) StartListenWithConn(onDisconnect network.SocketCallbackFunc, AgentNetConn net.PacketConn) {
 	tlsConfig := utils.GenTLSConfig()
 	if s.QuicConfig == nil {
 		ctrl := &network.NetStatusControl{ShowStatusLevel: network.StatusLevelLostPacket}
 		ctrl.OnCongestionStateChanged = func(tracer *network.NetStatusTracer) {
-			slog.Debug("探测到网络状态发生变化")
+			//slog.Debug("探测到网络状态发生变化")
 		}
 		s.QuicConfig = &quic.Config{
 			// MaxIncomingStreams: 0xffffffffffff, // 最大默认stream输入，默认100
@@ -111,6 +114,22 @@ func (s *Server) StartListen(onDisconnect network.SocketCallbackFunc) {
 			},
 		}
 	}
+	slog.Debug("正在为链接设置Tos")
+	conn := s.NetConn
+	if AgentNetConn != nil {
+		conn = AgentNetConn
+	}
+	// 2. 为 IPv4 数据包设置 DSCP / ToS 字段
+	p4 := ipv4.NewPacketConn(conn)
+	// DSCP 值示例：
+	// 46 (0xB8 >> 2) -> EF (Expedited Forwarding, 极速高优先级，常用于实时音视频/串流)
+	// 34 (0x88 >> 2) -> AF41 (高优先级数据)
+	// 注意：SetTOS 传入的是原始 8 位 IPv4 ToS 字节，DSCP 占据高 6 位，因此需要左移 2 位
+	dscpEF := 46 << 2
+	if err := p4.SetTOS(dscpEF); err != nil {
+		slog.Error("警告: 设置 IPv4 DSCP 失败 (可能需要管理员权限或系统支持):", slog.Any("err", err))
+	}
+
 	// 4. 构建 quic.Transport（复用刚刚创建的底层 conn）
 	tr := &quic.Transport{
 		Conn: s.NetConn,
