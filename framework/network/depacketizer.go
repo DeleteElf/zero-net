@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"sync"
 	"time"
 )
@@ -61,8 +62,9 @@ type Depacketizer struct {
 	FecEncoderFactory
 	framework.CloseableObject
 
-	groupLock     sync.Mutex
-	StreamChannel *StreamChannel
+	groupLock         sync.Mutex
+	StreamChannel     *StreamChannel
+	FrameStreamBuffer [][]byte
 }
 
 func NewDepacketizer(sc *StreamChannel) *Depacketizer {
@@ -76,6 +78,7 @@ func NewDepacketizer(sc *StreamChannel) *Depacketizer {
 		CloseableObject: framework.CloseableObject{
 			Closed: false,
 		},
+		FrameStreamBuffer: make([][]byte, 0, 1020),
 	}
 	go d.Decode()
 	return d
@@ -419,27 +422,23 @@ func (d *Depacketizer) Decode() {
 					}
 				case FecDepacketizeKeepRtpPacket: //保留block数据，我们只处理group内的数据
 					//同帧的数据，header、frameIndex、ssrc、multiFecFlags、multiFecBlocks、timestamp一样，
-					//sequenceNumber需要重建，sequenceNumber从0开始
 					totalSize := VideoHeaderLength + int(nextGroup.ShardDataLength)*int(nextGroup.ShardCount)
-					readers := make([]io.Reader, int(nextGroup.ShardCount)+1)
-					var resultData []byte
-					if nextGroup.Packets[0] == nil {
-						resultData = RebuildRtpPacket(nextGroup.HeaderTemplate, []byte{}, uint8(0), header.DataShards)[:VideoHeaderLength]
-					} else { //清除fecPercentage的数据
-						resultData = nextGroup.Packets[0].Payload[:VideoHeaderLength] //直接使用原始数据包，实现零拷贝
+					if nextGroup.HeaderSample.BlockIdx == 0 {
+						d.FrameStreamBuffer = d.FrameStreamBuffer[:0]
+						//slices.Grow(d.FrameStreamBuffer, 1)//不用反复分配
+						var resultData []byte
+						if nextGroup.Packets[0] == nil {
+							resultData = RebuildRtpPacket(nextGroup.HeaderTemplate, []byte{}, uint8(0), header.DataShards)[:VideoHeaderLength]
+						} else { //清除fecPercentage的数据
+							resultData = nextGroup.Packets[0].Payload[:VideoHeaderLength] //直接使用原始数据包，实现零拷贝
+						}
+						binary.BigEndian.PutUint16(resultData[2:], uint16(nextGroup.HeaderSample.FrameIndex)) //写入新的SequenceNumber
+						clear(resultData[24:32])                                                              //清空24-32的标记信息
+						d.FrameStreamBuffer = append(d.FrameStreamBuffer, resultData)
 					}
-					binary.BigEndian.PutUint16(resultData[2:], d.RebuildSequenceNumber) //写入新的SequenceNumber
-					resultData[24] = 0x7
-					binary.LittleEndian.PutUint32(resultData[28:], uint32(1)<<22)
-					//slog.Debug("执行Fec解包成功，正在执行FecDepacketizeKeepRtpPacket", slog.Any("ssrc", header.Ssrc),
-					//	slog.Any("groupId", header.GroupIdx), slog.Any("SequenceNumber", d.RebuildSequenceNumber))
-					d.RebuildSequenceNumber++
-					readers[0] = bytes.NewReader(resultData)
-					for j := uint8(0); j < nextGroup.ShardCount; j++ {
-						readers[j+1] = bytes.NewReader(nextGroup.Shards[j])
-					}
-					streamReader := io.MultiReader(readers...)
-					d.StreamChannel.handleReaderToChannel(nextGroup.HeaderSample.Ssrc, streamReader, totalSize)
+					d.FrameStreamBuffer = append(d.FrameStreamBuffer, nextGroup.Shards[:nextGroup.ShardCount]...)
+					netBuffer := net.Buffers(d.FrameStreamBuffer)
+					d.StreamChannel.handleNetBufferToChannel(nextGroup.HeaderSample.Ssrc, netBuffer, totalSize)
 				case FecDepacketizeKeepRtpPacketAndSize:
 					//slog.Debug("执行Fec解包成功，正在执行FecDepacketizeKeepRtpPacketAndSize", slog.Any("groupId", header.GroupIdx))
 					for i := 0; i < int(header.DataShards); i++ {

@@ -8,8 +8,10 @@ import (
 	"github.com/DeleteElf/zero-net/framework"
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/quic-go/quic-go"
+	"golang.org/x/net/quic"
 	"io"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 )
@@ -546,6 +548,20 @@ func (sc *StreamChannel) handleReaderToChannel(ssrc uint8, r io.Reader, size int
 			Ssrc:      ssrc,
 			Level:     sc.Level,
 			Reader:    r,
+		}
+	}
+}
+
+func (sc *StreamChannel) handleNetBufferToChannel(ssrc uint8, b net.Buffers, size int) {
+	if sc.DataStreamChannel != nil {
+		sc.DataStreamChannel <- DataStream{
+			ClientId:  sc.ClientId,
+			ChannelId: sc.ChannelId,
+			Offset:    0,
+			Size:      size,
+			Ssrc:      ssrc,
+			Level:     sc.Level,
+			Reader:    &b,
 		}
 	}
 }
