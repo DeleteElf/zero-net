@@ -253,7 +253,7 @@ func (s *Socket) HandleChannelStreamDatagram() {
 		if s.IsClosed() {
 			return
 		}
-		data, err := s.Conn.ReceiveDatagram(ctx)
+		rawBuffer, err := s.Conn.ReceiveDatagram(ctx)
 		if err != nil {
 			// 如果是连接关闭或 Context 取消，优雅退出循环，防止 CPU 100% 爆满
 			if errors.Is(err, context.Canceled) || s.IsClosed() {
@@ -267,6 +267,8 @@ func (s *Socket) HandleChannelStreamDatagram() {
 			slog.Debug("收到首个Datagram数据包！")
 			isFirst = false
 		}
+		data := make([]byte, len(rawBuffer))
+		copy(data, rawBuffer)    //深拷贝数据（Copy）
 		s.GetFecDecodeInfo(data) //持续接收数据
 		//packet := s.GetFecDecodeInfo(data)
 		//if packet != nil {
@@ -386,6 +388,9 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		packet.Header.Timestamp = binary.BigEndian.Uint32(data[4:])
 		packet.Header.GroupIdx = data[16] //  uint64(binary.BigEndian.Uint32(data[16:]))
 		packet.Header.FrameIndex = binary.LittleEndian.Uint32(data[20:])
+		//if packet.Header.FrameIndex < 10 {
+		//	slog.Debug("打印前10个frameIndex", slog.Any("frameIndex", packet.Header.FrameIndex))
+		//}
 		//(blockIndex << 4) | ((fec_blocks_needed - 1) << 6);
 		packet.Header.BlockCount = (data[27] >> 6) + 1
 		packet.Header.BlockIdx = data[27] >> 4 & 0x3
@@ -396,8 +401,8 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 		packet.Header.HeaderSize = VideoHeaderLength
 		packet.Payload = data
 		packet.Header.Length = uint16(size - int(packet.Header.HeaderSize))
-		packet.Header.Total = uint32(packet.Header.DataShards) * uint32(packet.Header.Length)
-		packet.Header.Idr = uint8(fecInfo >> 11 & 0x1) //idr 1 位
+		packet.Header.Total = binary.BigEndian.Uint32(data[12:]) //新版本从服务端的数据包即可获取总长度，fec重组后，可以精准处理
+		packet.Header.Idr = uint8(fecInfo >> 11 & 0x1)           //idr 1 位
 	case CustomFecHeader:
 		if size <= FecPacketHeaderLength {
 			slog.Debug("收到无效的fec数据包", slog.Int("len", size), slog.Any("data", data))
@@ -601,7 +606,7 @@ func (s *Socket) SendFecDatagram(channelId int, data []byte) (bool, error) {
 				binary.BigEndian.PutUint16(buffer[i][2:], uint16(lowSeq+uint32(i)))                                      //SequenceNumber
 				binary.LittleEndian.PutUint32(buffer[i][16:], (lowSeq+uint32(i))<<8)                                     //streamPacketIndex 这个也需要变化
 				buffer[i][16] = packetizer.PacketIndex
-				buffer[i][24] = 0 //这个属性是什么并不重要
+				buffer[i][24] = 0
 				buffer[i][26] = 0
 				shards[i] = buffer[i][VideoHeaderLength:blockSize]
 			}

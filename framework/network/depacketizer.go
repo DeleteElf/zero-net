@@ -49,7 +49,7 @@ type Depacketizer struct {
 	//丢包数量
 	MissingPackets uint16
 	//重新构建的序列
-	RebuildSequenceNumber uint16
+	RebuildSequenceNumber uint32
 	// 是否已经报告丢帧
 	ReportedLostFrame bool
 	//是否收到Oos数据
@@ -62,16 +62,19 @@ type Depacketizer struct {
 	FecEncoderFactory
 	framework.CloseableObject
 
-	groupLock         sync.Mutex
-	StreamChannel     *StreamChannel
+	groupLock     sync.Mutex
+	StreamChannel *StreamChannel
+
 	FrameStreamBuffer [][]byte
+	FrameTotalSize    uint32
 }
 
 func NewDepacketizer(sc *StreamChannel) *Depacketizer {
 	d := &Depacketizer{
-		Groups:         make(map[uint8]*FecGroup),
-		CurrentGroupId: 1, //首次从1开始工作
-		StreamChannel:  sc,
+		Groups:            make(map[uint8]*FecGroup),
+		CurrentGroupId:    1, //首次从1开始工作
+		CurrentFrameIndex: 1, //视频首次从1开始工作，音频用不上，而且音频初始，都会跳进一下，以免太早有声音。
+		StreamChannel:     sc,
 		FecEncoderFactory: FecEncoderFactory{
 			FecEncoders: make(map[string]reedsolomon.Encoder),
 		},
@@ -99,7 +102,9 @@ func (d *Depacketizer) OnClosed() error {
 func (d *Depacketizer) JumpToNextPacket(p *FecPacket) {
 	if p.Header.BlockIdx == 0 && utils.IsBefore8(d.CurrentGroupId, p.Header.GroupIdx) { //如果是比当前更新的关键帧
 		if p.Header.Idr == 1 {
-			slog.Debug("接收新的关键帧，跳到目标帧！", slog.Any("channel", p.Header.ChannelId), slog.Any("groupId", p.Header.GroupIdx))
+			slog.Debug("接收新的关键帧，跳到目标帧！", slog.Any("channel", p.Header.ChannelId),
+				slog.Any("ssrc", p.Header.Ssrc), slog.Any("groupId", p.Header.GroupIdx),
+				slog.Any("frameIndex", p.Header.FrameIndex))
 		} else {
 			slog.Debug("跳到目标帧！", slog.Any("channel", p.Header.ChannelId), slog.Any("groupId", p.Header.GroupIdx))
 		}
@@ -228,33 +233,22 @@ func (d *Depacketizer) processAudioPacket(group *FecGroup) {
 		slog.Debug("解包器未设置流通道，请先设置！")
 		return
 	}
-	switch d.StreamChannel.Level {
-	case FecDepacketizeKeepRtpData:
-		for i := 0; i < int(group.ShardCount); i++ {
-			if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-				group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
-			}
-			d.StreamChannel.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(group.Shards[i]), int(group.ShardDataLength))
-		}
-	case FecDepacketizeKeepRtpPacket, FecDepacketizeKeepRtpPacketAndSize: //音频的处置方式
-		//case FecDepacketizeKeepRtpPacketAndSize:
-		for i := 0; i < int(group.ShardCount); i++ {
-			var resultData []byte
-			if group.Packets[i] == nil {
-				if d.StreamChannel.Level == FecDepacketizeKeepRtpPacketAndSize {
-					if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
-						group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
-					}
-					resultData = RebuildRtpPacket(group.HeaderTemplate, group.Shards[i], uint8(i), group.HeaderSample.DataShards)
-				} else { //处理超时，直接丢入一个rtp空包
-					resultData = RebuildRtpPacket(group.HeaderTemplate, []byte{}, uint8(i), group.HeaderSample.DataShards)
+	//对于音频来说，都是一样的处置方式
+	for i := 0; i < int(group.ShardCount); i++ {
+		var resultData []byte
+		if group.Packets[i] == nil {
+			if d.StreamChannel.Level == FecDepacketizeKeepRtpPacketAndSize {
+				if group.Shards[i] == nil { //没有到的数据，补充一个空数据进去
+					group.Shards[i] = make([]byte, group.ShardDataLength) //音频数据不用重发，直接填满空洞即可
 				}
-			} else { //清除fecPercentage的数据
-				resultData = group.Packets[i].Payload //直接使用原始数据包，实现零拷贝
+				resultData = RebuildRtpPacket(group.HeaderTemplate, group.Shards[i], uint8(i), group.HeaderSample.DataShards)
+			} else { //处理超时，直接丢入一个rtp空包
+				resultData = RebuildRtpPacket(group.HeaderTemplate, []byte{}, uint8(i), group.HeaderSample.DataShards)
 			}
-			d.StreamChannel.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(resultData), len(resultData))
+		} else { //清除fecPercentage的数据
+			resultData = group.Packets[i].Payload //直接使用原始数据包，实现零拷贝
 		}
-	default:
+		d.StreamChannel.handleReaderToChannel(group.HeaderSample.Ssrc, bytes.NewReader(resultData), len(resultData))
 	}
 }
 
@@ -386,7 +380,7 @@ func (d *Depacketizer) Decode() {
 
 				//slog.Debug("执行Fec解包逻辑", slog.Any("groupId", header.GroupIdx))
 			}
-			d.DoNextGroup(nextGroup.HeaderSample.BlockCount) //解包成功就直接进入下一帧，免得再接收多余的帧
+
 			//暂时只支持97和127的音频
 			if nextGroup.HeaderTemplate[0] == RtpHeader && (nextGroup.HeaderTemplate[1] == AudioHeader || nextGroup.HeaderTemplate[1] == AudioDynamicHeader) {
 				d.processAudioPacket(nextGroup)
@@ -396,36 +390,13 @@ func (d *Depacketizer) Decode() {
 				//1，我需要补充没有到的正规rtp 包的头信息 ，假设 一共6个数据包，数据分片是4个，当前到达的索引是 0,1,3,4，那么则需要补充序号是2的rtp头
 				//2，我需要告诉上层逻辑，fec已经处理完毕了
 				switch d.StreamChannel.Level {
-				case FecDepacketizeKeepRtpData: //全部合成成一帧数据
-					//slog.Debug("执行Fec解包成功，正在执行FecDepacketizeKeepRtpData", slog.Any("groupId", header.GroupIdx))
-					if nextGroup.HeaderSample.BlockIdx == nextGroup.HeaderSample.BlockCount-1 { //确保是最后一个分块
-						totalShardCount := uint16(0)
-						totalSize := 0
-						startGroupId := nextGroup.HeaderSample.GroupIdx - nextGroup.HeaderSample.BlockCount + 1
-						d.groupLock.Lock()
-						for i := uint8(0); i < nextGroup.HeaderSample.BlockCount; i++ {
-							totalShardCount += uint16(d.Groups[startGroupId+i].ShardCount)
-						}
-						index := 0
-						readers := make([]io.Reader, int(totalShardCount))
-						for i := uint8(0); i < nextGroup.HeaderSample.BlockCount; i++ {
-							group := d.Groups[startGroupId+i]
-							for j := uint8(0); j < group.ShardCount; j++ {
-								totalSize += int(group.ShardDataLength)
-								readers[index] = bytes.NewReader(group.Shards[j])
-								index++
-							}
-						}
-						d.groupLock.Unlock()
-						streamReader := io.MultiReader(readers...)
-						d.StreamChannel.handleReaderToChannel(nextGroup.HeaderSample.Ssrc, streamReader, totalSize)
-					}
-				case FecDepacketizeKeepRtpPacket: //保留block数据，我们只处理group内的数据
+				case FecDepacketizeFullFrame: //全部合成成一帧数据
 					//同帧的数据，header、frameIndex、ssrc、multiFecFlags、multiFecBlocks、timestamp一样，
-					totalSize := VideoHeaderLength + int(nextGroup.ShardDataLength)*int(nextGroup.ShardCount)
+					if nextGroup.HeaderSample.Total == 0 { //对旧版本兼容
+						nextGroup.HeaderSample.Total = uint32(nextGroup.ShardDataLength) * uint32(nextGroup.ShardCount)
+					}
 					if nextGroup.HeaderSample.BlockIdx == 0 {
 						d.FrameStreamBuffer = d.FrameStreamBuffer[:0]
-						//slices.Grow(d.FrameStreamBuffer, 1)//不用反复分配
 						var resultData []byte
 						if nextGroup.Packets[0] == nil {
 							resultData = RebuildRtpPacket(nextGroup.HeaderTemplate, []byte{}, uint8(0), header.DataShards)[:VideoHeaderLength]
@@ -434,11 +405,56 @@ func (d *Depacketizer) Decode() {
 						}
 						binary.BigEndian.PutUint16(resultData[2:], uint16(nextGroup.HeaderSample.FrameIndex)) //写入新的SequenceNumber
 						clear(resultData[24:32])                                                              //清空24-32的标记信息
+						resultData[24] = 0x7                                                                  //同个数据包同时包含 FLAG_CONTAINS_PIC_DATA FLAG_SOF FLAG_EOF
+						resultData[27] = 0x0                                                                  //仅有一个block
+						binary.LittleEndian.PutUint32(resultData[28:], 1<<22)                                 //如果要使原来的逻辑没有问题，写入fec数据分片数1
 						d.FrameStreamBuffer = append(d.FrameStreamBuffer, resultData)
+						d.FrameTotalSize = VideoHeaderLength
 					}
+					//每个尾部的0，要去掉
+					length := nextGroup.HeaderSample.Total - uint32(nextGroup.ShardDataLength)*(uint32(nextGroup.ShardCount)-1)
+					nextGroup.Shards[nextGroup.ShardCount-1] = nextGroup.Shards[nextGroup.ShardCount-1][0:length] //去掉零之后的长度
 					d.FrameStreamBuffer = append(d.FrameStreamBuffer, nextGroup.Shards[:nextGroup.ShardCount]...)
-					netBuffer := net.Buffers(d.FrameStreamBuffer)
-					d.StreamChannel.handleNetBufferToChannel(nextGroup.HeaderSample.Ssrc, netBuffer, totalSize)
+					d.FrameTotalSize += nextGroup.HeaderSample.Total
+					if nextGroup.HeaderSample.BlockIdx == nextGroup.HeaderSample.BlockCount-1 {
+						netBuffer := net.Buffers(d.FrameStreamBuffer)
+						d.StreamChannel.handleNetBufferToChannel(nextGroup.HeaderSample.Ssrc, netBuffer, int(d.FrameTotalSize))
+					}
+				case FecDepacketizeKeepRtpPacketBlock: //保留block数据，我们只处理group内的数据
+					//同块的数据，header、frameIndex、ssrc、timestamp一样，
+					//sequenceNumber需要重建，sequenceNumber从0开始
+					if nextGroup.HeaderSample.Total == 0 { //对旧版本兼容
+						nextGroup.HeaderSample.Total = uint32(nextGroup.ShardDataLength) * uint32(nextGroup.ShardCount)
+					}
+					if d.CurrentFrameIndex != nextGroup.HeaderSample.FrameIndex {
+						slog.Warn("解包顺序错误", slog.Any("ssrc", nextGroup.HeaderSample.Ssrc),
+							slog.Any("期望frameIndex", d.CurrentFrameIndex),
+							slog.Any("实际frameIndex", nextGroup.HeaderSample.FrameIndex),
+							slog.Any("groupIndex", nextGroup.HeaderSample.GroupIdx),
+							slog.Any("大小", nextGroup.HeaderSample.Total+VideoHeaderLength))
+						d.CurrentFrameIndex = nextGroup.HeaderSample.FrameIndex
+						slog.Debug("已经修正当前解包索引")
+					}
+					blockBuffer := make(net.Buffers, 0, nextGroup.ShardCount+1)
+					var resultData []byte
+					if nextGroup.Packets[0] == nil {
+						resultData = RebuildRtpPacket(nextGroup.HeaderTemplate, []byte{}, uint8(0), header.DataShards)[:VideoHeaderLength]
+					} else { //清除fecPercentage的数据
+						resultData = nextGroup.Packets[0].Payload[:VideoHeaderLength] //直接使用原始数据包，实现零拷贝
+					}
+					binary.BigEndian.PutUint16(resultData[2:], uint16(d.RebuildSequenceNumber)) //写入新的SequenceNumber
+					binary.LittleEndian.PutUint32(resultData[16:], d.RebuildSequenceNumber<<8)  //写入新的streamPacketIndex
+					resultData[24] = 0x7                                                        //同个数据包同时包含 FLAG_CONTAINS_PIC_DATA FLAG_SOF FLAG_EOF
+					binary.LittleEndian.PutUint32(resultData[28:], 1<<22)                       //如果要使原来的逻辑没有问题，写入fec数据分片数1
+					d.RebuildSequenceNumber++
+					blockBuffer = append(blockBuffer, resultData)                                 //加入头数据
+					blockBuffer = append(blockBuffer, nextGroup.Shards[:nextGroup.ShardCount]...) //加入分片数据
+					//netBuffer := net.Buffers(blockBuffer)
+					//slog.Debug("解包完成", slog.Any("ssrc", nextGroup.HeaderSample.Ssrc),
+					//	slog.Any("frameIndex-header", nextGroup.HeaderSample.FrameIndex),
+					//	slog.Any("frameIndex", binary.LittleEndian.Uint32(resultData[20:])),
+					//	slog.Any("CurrentFrameIndex", d.CurrentFrameIndex), slog.Any("大小", nextGroup.HeaderSample.Total+VideoHeaderLength))
+					d.StreamChannel.handleNetBufferToChannel(nextGroup.HeaderSample.Ssrc, blockBuffer, int(nextGroup.HeaderSample.Total)+VideoHeaderLength)
 				case FecDepacketizeKeepRtpPacketAndSize:
 					//slog.Debug("执行Fec解包成功，正在执行FecDepacketizeKeepRtpPacketAndSize", slog.Any("groupId", header.GroupIdx))
 					for i := 0; i < int(header.DataShards); i++ {
@@ -477,6 +493,7 @@ func (d *Depacketizer) Decode() {
 				//slog.Debug("fec重组了一条数据", slog.Any("frame", frameBuf.String()))
 				d.StreamChannel.handleReaderToChannel(nextGroup.HeaderSample.Ssrc, bytes.NewReader(frameBuf.Bytes()), frameBuf.Len())
 			}
+			d.DoNextGroup(nextGroup.HeaderSample.BlockCount) //解包成功就直接进入下一帧，免得再接收多余的帧
 		}
 	}
 }

@@ -29,7 +29,7 @@ const (
 	//MessageExpireTime  = 200 * time.Millisecond
 	//AudioExpireTime    = 100 * time.Millisecond
 	//VideoExpireTime    = 100 * time.Millisecond
-	AudioOosExpireTime = 50 * time.Millisecond
+	AudioOosExpireTime = 80 * time.Millisecond
 	//VideoOosExpireTime = 500 * time.Millisecond
 	// AudioDataTime 音频数据包的间隔时长
 	AudioDataTime = 10 * time.Millisecond
@@ -45,10 +45,10 @@ const (
 	FecDisabled FecLevel = iota
 	// FecDepacketizeKeepRtpPacketAndSize 保留RtpPacket结构和大小，仅执行fec修复
 	FecDepacketizeKeepRtpPacketAndSize
-	// FecDepacketizeKeepRtpPacket 最佳方案。保留RtpPacket结构，除了执行fec修复外，会执行解包，将整个block分块数据拼接成大数据包,这个模式会修改rtp的数据格式，如果是音频的话，空包也不会保留大小
-	FecDepacketizeKeepRtpPacket
-	// FecDepacketizeKeepRtpData 最高性能，因为直接使用分片数据即可，去掉Rtp数据包结构，仅保留拼接好的视频编码数据,与 reedsolomon 配合性能最佳，不需要恢复rtp结构
-	FecDepacketizeKeepRtpData
+	// FecDepacketizeKeepRtpPacketBlock 除了执行fec修复外，会执行解包，保留整个block分块数据,这个模式会修改rtp的数据格式，如果是音频的话，空包也不会保留大小
+	FecDepacketizeKeepRtpPacketBlock
+	// FecDepacketizeFullFrame 最高性能，构建基于frame的RTP数据包，因为直接使用分片数据即可，去掉Rtp数据包结构，仅保留拼接好的视频编码数据,与 reedsolomon 配合性能最佳
+	FecDepacketizeFullFrame
 )
 
 type StreamConfig struct {
@@ -83,11 +83,11 @@ func (c *StreamConfig) SetStreamType(t StreamType) {
 		c.Type = t
 		switch c.Type {
 		case Audio: //音频，默认50%
-			c.FecEnableLevel = FecDepacketizeKeepRtpPacket
+			c.FecEnableLevel = FecDepacketizeKeepRtpPacketBlock
 			c.DataShards = 4
 			c.ParityShards = 2
 		case Video: //视频，默认30%
-			c.FecEnableLevel = FecDepacketizeKeepRtpPacket
+			c.FecEnableLevel = FecDepacketizeKeepRtpPacketBlock
 			c.DataShards = 10
 			c.ParityShards = 3
 			break

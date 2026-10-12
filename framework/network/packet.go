@@ -78,9 +78,11 @@ type NvidiaVideoPacket struct {
 }
 
 type VideoPacketHeader struct {
-	Rtp      RtpPacket
-	Reserved [4]byte
-	Packet   NvidiaVideoPacket
+	Rtp RtpPacket
+	//Reserved [4]byte //原来预留的4位，我们用来存储数据包总大小
+	//传输数据包的总大小，不考虑超过uint32的大小的情况
+	TotalSize uint32
+	Packet    NvidiaVideoPacket
 }
 
 type VideoPacket struct {
@@ -128,7 +130,7 @@ func RebuildRtpPacket(header, data []byte, shardIndex, dataShards uint8) []byte 
 			//声音每帧都偏移了一个 AudioDataTime,通过偏移量修正
 			timestamp := binary.BigEndian.Uint32(buffer[4:])
 			timestamp = uint32(time.UnixMilli(int64(timestamp)).Add(time.Duration(offset) * AudioDataTime).UnixMilli())
-			if timestamp != uint32(sequenceNumber)*10 {
+			if uint16(timestamp/10) != sequenceNumber {
 				slog.Debug("重建rtp数据包，时间验证错误！", slog.Any("seq", sequenceNumber), slog.Any("timestamp", timestamp))
 			}
 			binary.BigEndian.PutUint16(buffer[2:], sequenceNumber) //计算当前的包位置
