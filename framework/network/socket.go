@@ -267,25 +267,12 @@ func (s *Socket) HandleChannelStreamDatagram() {
 			slog.Debug("收到首个Datagram数据包！")
 			isFirst = false
 		}
+		if s.IsClosed() {
+			return
+		}
 		data := make([]byte, len(rawBuffer))
 		copy(data, rawBuffer)    //深拷贝数据（Copy）
 		s.GetFecDecodeInfo(data) //持续接收数据
-		//packet := s.GetFecDecodeInfo(data)
-		//if packet != nil {
-		//	sc := s.StreamChannels[packet.Header.ChannelId]
-		//	if sc == nil {
-		//		return
-		//	}
-		//	if sc.DataStreamChannel == nil {
-		//		return
-		//	}
-		//
-		//	err = sc.FecDecode(packet)
-		//	if err != nil {
-		//		slog.Error("解包fec过程发生错误", slog.Any("channelId", packet.Header.ChannelId), slog.Any("err", err))
-		//		continue
-		//	}
-		//}
 	}
 }
 
@@ -449,10 +436,13 @@ func (s *Socket) GetFecDecodeInfo(data []byte) *FecPacket {
 	}
 	//检查解包器是否存在
 	sc := s.StreamChannels[packet.Header.ChannelId]
+	if sc == nil {
+		return nil
+	}
 	depacketizer, exists := sc.Depacketizers[packet.Header.Ssrc]
 	if !exists {
 		depacketizer = NewDepacketizer(sc) //实时创建第2个ssrc之后的解包器
-		s.StreamChannels[packet.Header.ChannelId].Depacketizers[packet.Header.Ssrc] = depacketizer
+		sc.Depacketizers[packet.Header.Ssrc] = depacketizer
 	}
 	//检查是否是否需要丢弃
 	if utils.IsBefore8(packet.Header.GroupIdx, depacketizer.CurrentGroupId) { //已经解包成功的Id就不要了

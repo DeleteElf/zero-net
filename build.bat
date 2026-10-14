@@ -15,6 +15,7 @@ echo 正在删除旧版本
 del output\net.dll
 del output\net.lib
 del output\net.exp
+del output\net.pdb
 
 echo 正在创建版本信息
 windres -i ./app.rc -o ./main/app.syso
