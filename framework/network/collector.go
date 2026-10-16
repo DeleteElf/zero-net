@@ -90,7 +90,7 @@ func (t *NetStatusRecord) RecordEvent(evt qlogwriter.Event) {
 			switch e.State {
 			case qlog.CongestionStateSlowStart:
 				if t.tracer.control.ShowStatusLevel != StatusLevelNone {
-					slog.Info("网络监控，当前状态:探测可用带宽！")
+					slog.Debug("网络监控，当前状态:探测可用带宽！")
 				}
 				t.tracer.LastCongestionState = string(e.State)
 				if t.tracer.control.OnCongestionStateChanged != nil {
@@ -98,7 +98,7 @@ func (t *NetStatusRecord) RecordEvent(evt qlogwriter.Event) {
 				}
 			case qlog.CongestionStateRecovery:
 				if t.tracer.control.ShowStatusLevel != StatusLevelNone {
-					slog.Info("网络监控，当前状态:轻微拥塞！")
+					slog.Debug("网络监控，当前状态:轻微拥塞！")
 				}
 				t.tracer.LastCongestionState = string(e.State)
 				if t.tracer.control.OnCongestionStateChanged != nil {
@@ -107,7 +107,7 @@ func (t *NetStatusRecord) RecordEvent(evt qlogwriter.Event) {
 			default:
 				if t.tracer.LastCongestionState == string(qlog.CongestionStateRecovery) {
 					if t.tracer.control.ShowStatusLevel != StatusLevelNone {
-						slog.Info("网络监控，当前状态：从拥塞中恢复！")
+						slog.Debug("网络监控，当前状态：从拥塞中恢复！")
 					}
 					t.tracer.LastCongestionState = string(e.State)
 					if t.tracer.control.OnCongestionStateChanged != nil {
