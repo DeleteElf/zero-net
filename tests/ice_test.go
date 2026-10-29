@@ -34,7 +34,9 @@ func TestIceClient(t *testing.T) {
 			answer := result["data"].(map[string]interface{})
 			if answer["sdp"] != nil {
 				conn, addr := cli.PunchHole(answer["sdp"].(string), 30*time.Second, false)
-				err := cli.ConnectByIce(conn, addr)
+				err = cli.ConnectToNet(3, conn, addr, func(sock *network.Socket) {
+					slog.Debug("socket已经断开===》！", slog.String("id", sock.Id))
+				}) //ConnectByIce(conn, addr)
 				if err != nil {
 					slog.Info("连接失败！", slog.Any("err", err))
 					return
@@ -130,11 +132,10 @@ func TestIceServer(t *testing.T) {
 						_ = ws.Send(re)
 					}
 					conn, _ := testServer.PunchHole(body["sdp"].(string), 30*time.Second, true)
-					testServer.ConnectByIce(conn)
 					go func() {
-						testServer.StartListen(func(sock *network.Socket) {
+						testServer.StartListenWithConn(func(sock *network.Socket) {
 							slog.Debug("客户端断开连接：", slog.String("id", sock.Id))
-						})
+						}, conn)
 					}()
 				}
 				break

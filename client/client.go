@@ -4,12 +4,9 @@ import "C"
 import (
 	"context"
 	"errors"
-	"github.com/DeleteElf/zero-net/framework"
 	"github.com/DeleteElf/zero-net/framework/network"
 	"github.com/DeleteElf/zero-net/framework/utils"
-	"github.com/DeleteElf/zero-net/ice"
 	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/qlogwriter"
 	"log/slog"
 	"net"
 	"time"
@@ -23,15 +20,12 @@ type Client struct {
 	ServerAddress string
 	serverAddr    net.Addr
 
-	NetConn       net.PacketConn
-	QuicConn      *quic.Conn
 	Socket        *network.Socket
 	StreamConfigs []network.StreamConfig
-	network.Config
-	ice.IceWorker
-	framework.CloseableObject
 
 	OnSocketConnected network.SocketCallbackFunc
+
+	network.Endpoint
 }
 
 // NewClient 创建客户端实例
@@ -70,18 +64,6 @@ func (cli *Client) OnClosed() error {
 	return nil
 }
 
-// ConnectByIce 通过Ice连接
-//
-//	-param conn:通过Ice获取到的连接
-//	-param dummyAddr:通过ice获取的连接的目标地址，注意：因为使用的是已知打通的 PacketConn，Target Address 可以使用 Dummy 虚拟地址
-//
-// return: 返回错误
-func (cli *Client) ConnectByIce(conn net.PacketConn, dummyAddr net.Addr) error {
-	return cli.ConnectToNet(3, conn, dummyAddr, func(sock *network.Socket) {
-		slog.Debug("socket已经断开===》！", slog.String("id", sock.Id))
-	})
-}
-
 func (cli *Client) Connect(channelCount int, networkType string, onDisconnect network.SocketCallbackFunc) error {
 	if networkType != network.STREAM_NETWORK_UDP {
 		return errors.New("暂时只支持udp连接！")
@@ -108,41 +90,16 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 		cli.NetConn = conn
 	}
 	cli.serverAddr = addr
-
-	tlsConfig := utils.GenTLSConfig()
-	if cli.QuicConfig == nil {
-		cli.QuicConfig = &quic.Config{
-			//MaxIncomingStreams:      0xffffffffffff,   // 最大默认stream输入，默认100
-			HandshakeIdleTimeout:    5 * time.Second,          // 默认5s
-			MaxIdleTimeout:          10 * time.Second,         // 默认30s，我们这边设置成10秒
-			KeepAlivePeriod:         3 * time.Second,          // 建议是 MaxIdleTimeout 的一半，或者更小的值
-			InitialPacketSize:       network.NetMtuPacketSize, //当前最大数据包一个基础包的大小
-			DisablePathMTUDiscovery: false,
-			Allow0RTT:               true,
-			EnableDatagrams:         cli.SupportFec,
-			Tracer: func(ctx context.Context, isClient bool, connID quic.ConnectionID) qlogwriter.Trace {
-				ctrl := &network.NetStatusControl{ShowStatusLevel: network.StatusLevelLostPacket}
-				return network.NewNetStatusTracer(ctrl)
-			},
-		}
-	}
-	if conn != nil {
-		slog.Debug("正在为链接设置Tos")
-		// 2. 为 IPv4 数据包设置 DSCP / ToS 字段
-		p4 := ipv4.NewPacketConn(conn)
-		// DSCP 值示例：
-		// 46 (0xB8 >> 2) -> EF (Expedited Forwarding, 极速高优先级，常用于实时音视频/串流)
-		// 34 (0x88 >> 2) -> AF41 (高优先级数据)
-		// 注意：SetTOS 传入的是原始 8 位 IPv4 ToS 字节，DSCP 占据高 6 位，因此需要左移 2 位
-		dscpEF := 46 << 2
-		if err := p4.SetTOS(dscpEF); err != nil {
-			slog.Error("警告: 设置 IPv4 DSCP 失败 (可能需要管理员权限或系统支持):", slog.Any("err", err))
-		}
+	err := cli.SetDSCP(conn, 46)
+	if err != nil {
+		return err
 	}
 	slog.Debug("正在远程连接", slog.Any("ServerAddress", cli.serverAddr))
 	tr := &quic.Transport{
 		Conn: cli.NetConn,
 	}
+	tlsConfig := utils.GenTLSConfig()
+	cli.SetDefaultConfig()
 	quicConn, err := tr.Dial(context.Background(), cli.serverAddr, tlsConfig, cli.QuicConfig)
 	if err != nil {
 		slog.Info("远程连接失败！", slog.Any("err", err))
@@ -151,23 +108,7 @@ func (cli *Client) ConnectToNet(channelCount int, conn net.PacketConn, addr net.
 	if cli.StreamConfigs == nil { //如果没有配置，则默认生成配置
 		cli.StreamConfigs = make([]network.StreamConfig, channelCount)
 	}
-	//if cli.SupportFec { //如果启动了Fec，我们需要对fec的配置进行检查
-	//	for i := 0; i < channelCount; i++ {
-	//		switch cli.StreamConfigs[i].Type {
-	//		//case network.Video: //客户端不需要向服务端发送视频数据，这里只有心跳包
-	//		//	cli.StreamConfigs[i].DataShards = 10
-	//		//	cli.StreamConfigs[i].ParityShards = 3
-	//		//	cli.StreamConfigs[i].FecLevel = true
-	//		//	break
-	//		case network.Audio: //客户端向服务端发送的所有数据里，只有音频需要fec
-	//			cli.StreamConfigs[i].DataShards = 4
-	//			cli.StreamConfigs[i].ParityShards = 2
-	//			cli.StreamConfigs[i].FecEnableLevel = network.FecDepacketizeKeepRtpPacket //音频保留rtp数据即可
-	//		default:
-	//			break
-	//		}
-	//	}
-	//}
+
 	cli.Socket = network.NewSocket(cli.Id, channelCount, cli.QuicConfig.InitialPacketSize, onDisconnect)
 	cli.Socket.FecLimitPacketSize = cli.FecLimitPacketSize
 	cli.Socket.StreamConfigs = cli.StreamConfigs

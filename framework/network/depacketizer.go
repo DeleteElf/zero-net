@@ -6,7 +6,6 @@ import (
 	"github.com/DeleteElf/zero-net/framework"
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/klauspost/reedsolomon"
-	"io"
 	"log/slog"
 	"math"
 	"net"

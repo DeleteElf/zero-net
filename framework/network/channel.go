@@ -71,8 +71,8 @@ func NewStreamChannel(id string, index int) *StreamChannel {
 	//	cacheCount = 60
 	//}
 	sc := &StreamChannel{
-		//Channel:       make(chan StreamChannelData, 200),
-		DataStreamChannel: make(chan DataStream, 20),
+		//Channel:       make(chan StreamChannelData, 200), //这边队列会引起数据缓存堆叠，导致鼠标卡顿！
+		DataStreamChannel: make(chan DataStream),
 		ClientId:          id,
 		ChannelId:         index,
 		Depacketizers:     make(map[uint8]*Depacketizer), //初始化空的解包器

@@ -222,8 +222,8 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 		agt, err := agent.NewAgent(clientCtx.ServerAddress, uint32(proxy.Idx), 0, cfg)
 		if err == nil && agt != nil {
 			sock := agt.Socket
-			clientCtx.NetConn = sock
-			err := clientCtx.ConnectToNet(3, sock.Conn, agt.RemoteAddress, func(sock *network.Socket) {
+			clientCtx.NetConn = sock //代理实际使用的socket与实际使用的连接，不是同个对象，这里需要区分
+			err = clientCtx.ConnectToNet(3, sock.Conn, agt.RemoteAddress, func(sock *network.Socket) {
 				if agt.Socket != nil {
 					slog.Debug("正在与代理断开连接...")
 					_ = agt.Socket.Close()
@@ -272,7 +272,11 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 				answer := result["data"].(map[string]interface{})
 				if answer["sdp"] != nil {
 					conn, addr := clientCtx.PunchHole(answer["sdp"].(string), 30*time.Second, false)
-					err := clientCtx.ConnectByIce(conn, addr)
+					err = clientCtx.ConnectToNet(3, conn, addr, func(sock *network.Socket) {
+						if onDisConnected != nil {
+							C.callMessageCallback(onDisConnected, C.CString(sock.Id))
+						}
+					})
 					if err != nil {
 						slog.Error("客户端穿墙连接失败", slog.Any("err", err))
 						return C.Error
@@ -955,11 +959,10 @@ func SetOnWebSocketMessageCallback(callback C.MessageCallback) {
 								_ = websocketClient.Send(re)
 							}
 							conn, _ := serverCtx.PunchHole(body["sdp"].(string), 10*time.Second, true)
-							serverCtx.ConnectByIce(conn)
 							go func() {
-								serverCtx.StartListen(func(sock *network.Socket) {
+								serverCtx.StartListenWithConn(func(sock *network.Socket) {
 									slog.Debug("客户端断开连接：", slog.String("id", sock.Id))
-								})
+								}, conn)
 							}()
 						} else {
 							slog.Warn("接入ice时，因条件不满足而中断！")

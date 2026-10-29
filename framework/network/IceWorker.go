@@ -1,4 +1,4 @@
-package ice
+package network
 
 import (
 	"context"
@@ -40,7 +40,6 @@ func (c *icePacketConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 type IceWorkInterface interface {
 	DetectStun(portMin, portMax uint16) (string, error)
 	PunchHole(message string, timeout time.Duration, isServer bool) net.PacketConn
-	ConnectByIce(conn net.PacketConn) bool
 }
 
 type IceWorker struct {

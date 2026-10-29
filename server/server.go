@@ -2,41 +2,27 @@ package server
 
 import (
 	"context"
-	"github.com/DeleteElf/zero-net/framework"
 	"github.com/DeleteElf/zero-net/framework/network"
 	"github.com/DeleteElf/zero-net/framework/utils"
-	"github.com/DeleteElf/zero-net/ice"
 	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/qlogwriter"
 	"log/slog"
 	"net"
 	"strings"
 	"sync"
-	"time"
 )
 
 const MaxStreamCount = 6
-
-type Stream struct {
-	Info   *network.StreamInfo
-	Stream *quic.Stream
-	Server *Server
-}
 
 type Server struct {
 	isAgent  bool
 	listener *quic.Listener
 	Sockets  map[string]*network.Socket
-	NetConn  net.PacketConn
-	QuicConn *quic.Conn
 	lock     sync.Mutex
 
 	OnAcceptSocket       network.SocketCallbackFunc
 	OnSocketDisConnected network.SocketCallbackFunc
 
-	network.Config
-	ice.IceWorker
-	framework.CloseableObject
+	network.Endpoint
 }
 
 // NewServerByAddress 创建新的服务实例，根据设置的地址监听
@@ -86,55 +72,24 @@ func (s *Server) OnClosed() error {
 	return nil
 }
 
-func (s *Server) ConnectByIce(conn net.PacketConn) {
-	s.NetConn = conn
-}
-
 func (s *Server) StartListen(onDisconnect network.SocketCallbackFunc) {
 	s.StartListenWithConn(onDisconnect, nil)
 }
-func (s *Server) StartListenWithConn(onDisconnect network.SocketCallbackFunc, AgentNetConn net.PacketConn) {
-	tlsConfig := utils.GenTLSConfig()
-	if s.QuicConfig == nil {
-		ctrl := &network.NetStatusControl{ShowStatusLevel: network.StatusLevelLostPacket}
-		ctrl.OnCongestionStateChanged = func(tracer *network.NetStatusTracer) {
-			//slog.Debug("探测到网络状态发生变化")
-		}
-		s.QuicConfig = &quic.Config{
-			// MaxIncomingStreams: 0xffffffffffff, // 最大默认stream输入，默认100
-			HandshakeIdleTimeout:    5 * time.Second,          // 默认5s
-			MaxIdleTimeout:          10 * time.Second,         // 默认30s
-			KeepAlivePeriod:         3 * time.Second,          // 建议是 MaxIdleTimeout 的一半，或者更小的值
-			InitialPacketSize:       network.NetMtuPacketSize, //初始包大小
-			DisablePathMTUDiscovery: false,                    // 允许路径 MTU 探索
-			Allow0RTT:               true,
-			EnableDatagrams:         s.SupportFec, //允许直接传输udp
-			Tracer: func(ctx context.Context, isClient bool, connID quic.ConnectionID) qlogwriter.Trace {
-				return network.NewNetStatusTracer(ctrl)
-			},
-		}
+func (s *Server) StartListenWithConn(onDisconnect network.SocketCallbackFunc, conn net.PacketConn) {
+	if conn != nil {
+		s.NetConn = conn
 	}
-	slog.Debug("正在为链接设置Tos")
-	conn := s.NetConn
-	if AgentNetConn != nil {
-		conn = AgentNetConn
+	err := s.SetDSCP(s.NetConn, 46)
+	if err != nil {
+		slog.Error("设置qos出错！", slog.Any("err", err))
+		return
 	}
-	// 2. 为 IPv4 数据包设置 DSCP / ToS 字段
-	p4 := ipv4.NewPacketConn(conn)
-	// DSCP 值示例：
-	// 46 (0xB8 >> 2) -> EF (Expedited Forwarding, 极速高优先级，常用于实时音视频/串流)
-	// 34 (0x88 >> 2) -> AF41 (高优先级数据)
-	// 注意：SetTOS 传入的是原始 8 位 IPv4 ToS 字节，DSCP 占据高 6 位，因此需要左移 2 位
-	dscpEF := 46 << 2
-	if err := p4.SetTOS(dscpEF); err != nil {
-		slog.Error("警告: 设置 IPv4 DSCP 失败 (可能需要管理员权限或系统支持):", slog.Any("err", err))
-	}
-
 	// 4. 构建 quic.Transport（复用刚刚创建的底层 conn）
 	tr := &quic.Transport{
 		Conn: s.NetConn,
 	}
-	var err error
+	tlsConfig := utils.GenTLSConfig()
+	s.SetDefaultConfig()
 	s.listener, err = tr.Listen(tlsConfig, s.QuicConfig)
 
 	//s.listener, err = quic.Listen(s.NetConn, tlsConfig, quicConfig)
