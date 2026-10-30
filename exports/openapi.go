@@ -272,7 +272,8 @@ func ClientConnect(channelCount C.int, config *C.NetworkData) C.int {
 				answer := result["data"].(map[string]interface{})
 				if answer["sdp"] != nil {
 					conn, addr := clientCtx.PunchHole(answer["sdp"].(string), 30*time.Second, false)
-					err = clientCtx.ConnectToNet(3, conn, addr, func(sock *network.Socket) {
+					clientCtx.NetConn = conn
+					err = clientCtx.ConnectToNet(3, nil, addr, func(sock *network.Socket) {
 						if onDisConnected != nil {
 							C.callMessageCallback(onDisConnected, C.CString(sock.Id))
 						}
@@ -959,10 +960,11 @@ func SetOnWebSocketMessageCallback(callback C.MessageCallback) {
 								_ = websocketClient.Send(re)
 							}
 							conn, _ := serverCtx.PunchHole(body["sdp"].(string), 10*time.Second, true)
+							serverCtx.NetConn = conn
 							go func() {
 								serverCtx.StartListenWithConn(func(sock *network.Socket) {
 									slog.Debug("客户端断开连接：", slog.String("id", sock.Id))
-								}, conn)
+								}, nil)
 							}()
 						} else {
 							slog.Warn("接入ice时，因条件不满足而中断！")

@@ -5,6 +5,7 @@ import (
 	"github.com/DeleteElf/zero-net/framework/network"
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/quic-go/quic-go"
+	"golang.org/x/net/quic"
 	"log/slog"
 	"net"
 	"strings"
@@ -76,10 +77,10 @@ func (s *Server) StartListen(onDisconnect network.SocketCallbackFunc) {
 	s.StartListenWithConn(onDisconnect, nil)
 }
 func (s *Server) StartListenWithConn(onDisconnect network.SocketCallbackFunc, conn net.PacketConn) {
-	if conn != nil {
+	if s.NetConn == nil {
 		s.NetConn = conn
 	}
-	err := s.SetDSCP(s.NetConn, 46)
+	err := s.SetDSCP(conn, 46)
 	if err != nil {
 		slog.Error("设置qos出错！", slog.Any("err", err))
 		return

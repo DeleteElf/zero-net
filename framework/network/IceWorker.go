@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/pion/ice/v4"
+	"github.com/pion/stun/v3"
 	"log/slog"
 	"net"
 	"strings"
@@ -62,36 +64,33 @@ func (iw *IceWorker) DetectStunByDefault() (offer string, err error) {
 
 // DetectStun 探测stun服务获取公网ip和端口
 func (iw *IceWorker) DetectStun(portMin, portMax uint16) (offer string, err error) {
-	config := &ice.AgentConfig{
-		NetworkTypes: []ice.NetworkType{ice.NetworkTypeUDP4},
-		Urls: func() []*ice.URL {
-			urls := []*ice.URL{}
-			for _, s := range iw.Stun {
-				slog.Debug("加入stun地址", slog.String("url", s))
-				u, _ := ice.ParseURL(s)
-				urls = append(urls, u)
-			}
-			return urls
-		}(),
+	urls := make([]*stun.URI, 0, len(iw.Stun))
+	for _, s := range iw.Stun {
+		slog.Debug("加入stun地址", slog.String("url", s))
+		u, err := stun.ParseURI(s)
+		if err != nil {
+			return "", fmt.Errorf("解析 STUN/TURN 地址 %q 失败: %w", s, err) // 不再吞错，URL 写错会悄悄丢失 srflx 候选
+		}
+		urls = append(urls, u)
 	}
-	if portMin != 0 && portMax != 0 { //等于0时，不用配置
-		config.PortMin = portMin
-		config.PortMax = portMax
-		//// 显式告知 pion/ice：我的公网 IP 就是这个，不需要 STUN 探测
-		//config.NAT1To1IPs = []string{"121.41.228.111"}
-		//// 针对 1:1 NAT 环境的 Candidate 类型配置
-		//config.NAT1To1IPCandidateType = ice.CandidateTypeHost
+	opts := []ice.AgentOption{
+		ice.WithNetworkTypes([]ice.NetworkType{ice.NetworkTypeUDP4}),
+		ice.WithUrls(urls),
+		// TOS 注入点：Agent 内部所有 UDP socket（host/srflx/relay）创建时自动带 EF 标记
+		//ice.WithNet(&NetTransport{tos: dscpEF}),
+		//不用测试tcp，因为我们只需要udp
+		ice.WithDisableActiveTCP(),
+	}
+	if portMin != 0 && portMax != 0 {
+		opts = append(opts, ice.WithPortRange(portMin, portMax))
 		if portMax-portMin < 5 {
 			slog.Warn("当端口范围太小时，会导致无法探测公网地址，建议范围不小于5！")
 		}
 	}
-
-	// 1. 创建 pion/ice Agent 配置
-	iw.Agent, err = ice.NewAgent(config)
+	iw.Agent, err = ice.NewAgentWithOptions(opts...)
 	if err != nil {
-		panic(err)
+		return "", fmt.Errorf("创建 ICE Agent 失败: %w", err)
 	}
-
 	// 2. 收集候选地址 (Candidates)
 	candidateChan := make(chan ice.Candidate, 10)
 	err = iw.Agent.OnCandidate(func(c ice.Candidate) {
