@@ -53,9 +53,7 @@ func (c *Client) Connect(address, heartMessage string) error {
 	}
 	ws, _, err := websocket.DefaultDialer.Dial(address, nil)
 	if err != nil {
-		if c.Reconnect {
-			go c.ReconnectWorking()
-		}
+		c.Disconnect()
 		return err
 	}
 	c.Conn = ws
@@ -202,18 +200,25 @@ func (c *Client) Disconnect() {
 		}
 		c.Connected = false
 		slog.Debug("websocket已经断开！")
-		if c.Reconnect {
-			go c.ReconnectWorking()
-		}
 	}
-}
-
-func (c *Client) ReconnectWorking() {
-	time.Sleep(1 * time.Second)
-	if c.Reconnect == true && c.Connected == false {
-		err := c.Connect(c.Address, c.HeartMessage)
-		if err != nil {
-			slog.Error("重新连接发生错误", slog.Any("err", err))
-		}
+	if c.Reconnect {
+		go func() {
+			for {
+				time.Sleep(1 * time.Second)
+				if c.Reconnect == true && c.Connected == false {
+					err := c.Connect(c.Address, c.HeartMessage)
+					if err != nil {
+						slog.Error("重新连接发生错误", slog.Any("err", err))
+					}
+				}
+				if c.Connected {
+					return
+				}
+				if !c.Reconnect {
+					slog.Warn("重连被取消！")
+					return
+				}
+			}
+		}()
 	}
 }
