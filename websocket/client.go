@@ -7,6 +7,7 @@ import (
 	"github.com/DeleteElf/zero-net/framework/utils"
 	"github.com/gorilla/websocket"
 	"log/slog"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type Client struct {
 	AsyncMessage   bool
 	Connected      bool
 	Reconnect      bool
+	reconnecting   int32
 	Reason         string
 	OnMessage      func(msg string)
 	OnConnected    func(msg string)
@@ -74,7 +76,7 @@ func (c *Client) Connect(address, heartMessage string) error {
 		return nil
 	})
 	go func() {
-		defer c.Disconnect()
+		//defer c.Disconnect()
 		for {
 			if c.Conn == nil {
 				break
@@ -201,24 +203,26 @@ func (c *Client) Disconnect() {
 		c.Connected = false
 		slog.Debug("websocket已经断开！")
 	}
-	if c.Reconnect {
-		go func() {
-			for {
-				time.Sleep(1 * time.Second)
-				if c.Reconnect == true && c.Connected == false {
-					err := c.Connect(c.Address, c.HeartMessage)
-					if err != nil {
-						slog.Error("重新连接发生错误", slog.Any("err", err))
-					}
-				}
-				if c.Connected {
-					return
-				}
-				if !c.Reconnect {
-					slog.Warn("重连被取消！")
-					return
-				}
-			}
-		}()
+	if c.Reconnect && atomic.CompareAndSwapInt32(&c.reconnecting, 0, 1) { //首次连接失败
+		go c.ReconnectWorking()
 	}
+}
+func (c *Client) ReconnectWorking() {
+	for {
+		time.Sleep(1 * time.Second)
+		if c.Reconnect == true && c.Connected == false {
+			err := c.Connect(c.Address, c.HeartMessage)
+			if err != nil {
+				slog.Error("重新连接发生错误", slog.Any("err", err))
+			}
+		}
+		if c.Connected {
+			break
+		}
+		if !c.Reconnect {
+			slog.Warn("重连被取消！")
+			break
+		}
+	}
+	atomic.StoreInt32(&c.reconnecting, 0)
 }
