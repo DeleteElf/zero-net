@@ -1,7 +1,7 @@
 @echo off
 
 echo "执行时间：$(date)"
-export PATH=$PATH:/home/deleteelf/workspace-go/go
+export PATH=$PATH:/home/DeleteElf/workspace-go/go
 
 echo "当前环境变量:${PATH}"
 
